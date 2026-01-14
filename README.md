@@ -1,7 +1,6 @@
 # MusicMoodBot 🎵
 
-Ứng dụng gợi ý nhạc dựa trên cảm xúc người dùng  
-Frontend sử dụng **Python + Flet**, Backend xử lý NLP & Recommendation.
+Ứng dụng gợi ý nhạc dựa trên cảm xúc người dùng . Frontend sử dụng Python + Flet, Backend xử lý NLP & Recommendation.
 
 ## Công nghệ
 
