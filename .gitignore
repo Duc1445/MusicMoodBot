@@ -1,13 +1,21 @@
 venv/
-
+.venv/
 
 __pycache__/
 *.pyc
-
+*.egg-info/
+*.dist-info/
 
 .DS_Store
 Thumbs.db
 
-
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# Database and local data
+music.db
+*.db
+.env
+.env.local
