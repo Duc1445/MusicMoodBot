@@ -1,126 +1,126 @@
-# Backend - Music Mood Engine
+# Backend - Công Cụ Phân Loại Tâm Trạng Nhạc
 
-## Overview
+## Tổng Quan
 
-The backend is a Python-based music mood prediction and analysis engine. It reads song metadata from SQLite, applies machine learning models (Valence-Arousal model), and predicts mood classifications with intensity levels.
+Backend là hệ thống dự đoán và phân tích tâm trạng bài hát sử dụng học máy. Nó đọc metadata từ SQLite, áp dụng mô hình Valence-Arousal để phân loại bài hát vào 5 loại tâm trạng khác nhau với 3 mức độ cường độ.
 
-## Architecture
+## Cấu Trúc Code
 
-```
-backend/
-├── main.py                 # Entry point and CLI
-├── requirements.txt        # Dependencies
-└── src/
-    ├── api/                # REST API endpoints
-    │   └── mood_api.py
-    ├── database/           # Database initialization & seeding
-    │   ├── init_db.py
-    │   ├── seed_data.py
-    │   └── music.sqbpro
-    ├── pipelines/          # ML model implementations
-    │   └── mood_engine.py
-    ├── repo/               # Data access layer (Repository pattern)
-    │   ├── history_repo.py
-    │   └── song_repo.py
-    └── services/           # Business logic & orchestration
-        ├── constants.py    # Shared constants (Song, MOODS, etc.)
-        ├── helpers.py      # Utility functions (clamp, percentile, softmax, etc.)
-        ├── mood_services.py    # DBMoodEngine service class
-        ├── history_service.py  # Song history management
-        └── ranking_service.py  # Song ranking logic
-```
+backend gồm các mô-đun chính:
 
-## Key Components
+- main.py: Điểm vào ứng dụng
+- requirements.txt: Danh sách thư viện
+- src/api/: Các endpoint REST API (13 routes)
+- src/database/: Quản lý cơ sở dữ liệu SQLite
+- src/pipelines/: Các mô hình học máy (Valence-Arousal)
+- src/repo/: Tầng truy cập dữ liệu (Repository pattern)
+- src/services/: Xử lý nghiệp vụ chính
+- src/search/: Tìm kiếm TF-IDF (200 lines)
+- src/ranking/: Dự đoán sở thích Logistic Regression (300 lines)
 
-### Services Layer
+## Các Thành Phần Chính
 
-- **constants.py**: Centralized type definitions and constants
-- **helpers.py**: Pure utility functions for data normalization and processing
-- **mood_services.py**: High-level `DBMoodEngine` class for mood predictions with caching
-- **history_service.py**: Manages song mood history
-- **ranking_service.py**: Ranks songs based on moods and other criteria
+**Tầng Services (Xử lý nghiệp vụ)**
 
-### Pipelines Layer
+- constants.py: Định nghĩa kiểu dữ liệu và hằng số
+- helpers.py: Các hàm tiện ích để chuẩn hóa dữ liệu
+- mood_services.py: Lớp DBMoodEngine dùng để dự đoán tâm trạng với cache
+- history_service.py: Theo dõi lịch sử tâm trạng bài hát
+- ranking_service.py: Xếp hạng bài hát theo tâm trạng
 
-- **mood_engine.py**: Core ML model implementation
-  - `MoodEngine`: VA (Valence-Arousal) + probabilistic prototypes
-  - `EngineConfig`: Configurable model parameters
-  - `Prototype2D`: 2D Gaussian prototype for mood representation
+**Tầng Pipelines (Các mô hình ML)**
 
-### Repository Layer
+- mood_engine.py: Mô hình chính sử dụng Valence-Arousal + xác suất Gaussian
+- EngineConfig: Các tham số cấu hình mô hình
+- Prototype2D: Đại diện toán học của từng tâm trạng
 
-- **song_repo.py**: Database operations (CRUD for songs)
-- **history_repo.py**: Song history tracking
+**Tầng Repository (Truy cập dữ liệu)**
 
-### Database Layer
+- song_repo.py: Các thao tác cơ sở dữ liệu
+- history_repo.py: Theo dõi lịch sử bài hát
 
-- Automatically creates and manages SQLite schema
-- Supports debug columns for model interpretability
+**Tầng Database**
 
-## Features
+- Tự động tạo và quản lý schema SQLite
+- Hỗ trợ cột debug để giải thích mô hình
 
-✅ **Mood Prediction**: Classifies songs into 5 moods:
+## Tính Năng
 
-- Energetic (High Valence, High Arousal)
-- Happy (High Valence, Low Arousal)
-- Sad (Low Valence, Low Arousal)
-- Stress (Low Valence, High Arousal)
-- Angry (Proxy based on loudness & tempo)
+**Dự đoán tâm trạng:** Phân loại bài hát vào 5 loại tâm trạng
 
-✅ **Intensity Levels**: 1 (Low), 2 (Medium), 3 (High)
+- Sôi động: Năng lượng cao, kích thích cao
+- Vui vẻ: Năng lượng cao, kích thích thấp
+- Buồn: Năng lượng thấp, kích thích thấp
+- Lo lắng: Năng lượng thấp, kích thích cao
+- Tức giận: Dựa vào công suất âm thanh và tốc độ
 
-✅ **Probabilistic Approach**: Uses 2D Gaussian prototypes per mood
+**Mức độ cường độ:** Chia làm 3 mức từ 1 đến 3
 
-✅ **Genre Adaptation**: Token-based genre prototypes (e.g., "ballad+rock")
+**Phương pháp xác suất:** Sử dụng Gaussian prototypes cho mỗi tâm trạng
 
-✅ **Automatic Refitting**: Re-fits model when song count changes
+**Thích ứng thể loại:** Hỗ trợ các prototype riêng cho từng thể loại nhạc
 
-## Quick Start
+**Tự động huấn luyện lại:** Khi số lượng bài hát thay đổi
 
-### Install Dependencies
+**Tìm kiếm TF-IDF:** Tìm bài hát theo từ khóa với xếp hạng relevance
+
+**Gợi ý cá nhân hóa:** Dự đoán sở thích người dùng dựa trên feedback
+
+## Bắt Đầu Nhanh
+
+Cài đặt thư viện:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Initialize Database
+Khởi tạo cơ sở dữ liệu:
 
 ```bash
 python -m backend.src.database.init_db
 python -m backend.src.database.seed_data
 ```
 
-### Predict Mood for Missing Songs
+Dự đoán tâm trạng cho bài hát chưa có:
 
 ```python
 from backend.src.services.mood_services import DBMoodEngine
-
 engine = DBMoodEngine("music.db", add_debug_cols=True)
-engine.update_missing()  # Fill NULL mood values
+engine.update_missing()
 ```
 
-### Update Single Song
+Cập nhật một bài hát:
 
 ```python
 engine.update_one(song_id=12)
 ```
 
-### Recompute All Songs
+Tính toán lại tất cả bài hát:
 
 ```python
 engine.update_all()
 ```
 
-## Configuration
+Chạy REST API:
 
-Edit `EngineConfig` in `mood_engine.py` to adjust:
+```bash
+python -m uvicorn backend.main:app --reload
+```
 
-- Weight for energy, tempo, loudness, danceability
-- Intensity thresholds
-- Prototype training parameters
-- Genre token adaptation settings
+Truy cập Swagger UI tại: http://127.0.0.1:8000/api/docs
 
-## Testing
+## Cấu Hình
+
+Chỉnh sửa EngineConfig trong mood_engine.py để điều chỉnh:
+
+- Trọng số các đặc điểm âm thanh
+- Ngưỡng mức độ cường độ
+- Tham số huấn luyện
+- Cấu hình thích ứng thể loại
+
+## Kiểm Tra
+
+Sử dụng CLI:
 
 ```bash
 python main.py --db music.db update-missing --debug-cols
@@ -128,12 +128,18 @@ python main.py --db music.db update-all
 python main.py --db music.db update-one --id 42
 ```
 
-## Development
+Hoặc test qua API:
 
-### Code Structure Principles
+```bash
+curl http://127.0.0.1:8000/api/moods/predict?energy=0.8&valence=0.6
+curl http://127.0.0.1:8000/api/moods/search?query=happy
+curl -X POST http://127.0.0.1:8000/api/moods/user/user1/preference?song_id=1&preference=1
+```
 
-1. **Separation of Concerns**: Each module has a single responsibility
-2. **DRY**: Helper functions extracted to avoid duplication
-3. **Type Safety**: Full type hints throughout
-4. **Testability**: Pure functions where possible
-5. **Extensibility**: Config classes for easy customization
+## Nguyên Tắc Thiết Kế
+
+- Mỗi mô-đun có một trách nhiệm duy nhất
+- Tránh lặp lại code, dùng helper functions
+- Type hints đầy đủ
+- Pure functions để dễ kiểm tra
+- Config classes để dễ tùy chỉnh

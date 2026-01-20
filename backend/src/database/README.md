@@ -1,85 +1,74 @@
-# Database Module
+# Mô-đun Database
 
-Handles SQLite database initialization, schema management, and sample data seeding.
+Quản lý khởi tạo SQLite, schema, và dữ liệu mẫu.
 
-## Files
+## Các File
 
-### init_db.py
+**init_db.py**
 
-- Creates SQLite database and tables
-- Initializes `songs` table with schema:
-  - `song_id` (INTEGER PRIMARY KEY)
-  - Standard audio features: `energy`, `valence`, `tempo`, `loudness`, `danceability`, `acousticness`, etc.
-  - Mood prediction columns: `mood`, `intensity`, `mood_score`
-  - Optional debug columns: `valence_score`, `arousal_score`, `mood_confidence`
-- Idempotent: Safe to run multiple times
+- Tạo cơ sở dữ liệu SQLite và bảng songs
+- Bảng songs chứa:
+  - song_id: Mã số bài hát (khóa chính)
+  - Thông tin: title, artist, genre
+  - Đặc điểm âm thanh: energy, valence, tempo, loudness, danceability, acousticness
+  - Tâm trạng: mood, intensity, mood_score
+  - Debug (tuỳ chọn): valence_score, arousal_score, mood_confidence
+- An toàn chạy nhiều lần
 
-### seed_data.py
+**seed_data.py**
 
-- Populates database with sample songs
-- Useful for testing and development
-- Can be extended with data from music APIs (Spotify, TuneBat, etc.)
+- Nhập dữ liệu mẫu vào cơ sở dữ liệu
+- Dùng cho kiểm tra và phát triển
+- Có thể mở rộng với Spotify API, TuneBat API, etc.
 
-### music.sqbpro
+**music.sqbpro**
 
-- SQLite database file (auto-created by init_db.py)
-- Contains all song metadata and predictions
+- File cơ sở dữ liệu SQLite chứa tất cả metadata và dự đoán
+- Tự động tạo bởi init_db.py
 
-## Usage
+## Cách Sử Dụng
 
-### Initialize Database Schema
+Tạo schema cơ sở dữ liệu:
 
 ```bash
 python -m backend.src.database.init_db
 ```
 
-### Seed Sample Data
+Nhập dữ liệu mẫu:
 
 ```bash
 python -m backend.src.database.seed_data
 ```
 
-### View Database
-
-Use SQLite viewer or:
+Xem dữ liệu:
 
 ```bash
 sqlite3 music.sqbpro
-sqlite> SELECT * FROM songs LIMIT 5;
+sqlite> select * from songs limit 5;
 ```
 
-## Database Schema
+## Schema Cơ Sở Dữ Liệu
 
-### songs table
+Bảng songs chứa các cột:
 
-```
-CREATE TABLE songs (
-    song_id INTEGER PRIMARY KEY,
-    title TEXT,
-    artist TEXT,
-    genre TEXT,
-    energy INTEGER,              -- 0-100
-    valence INTEGER,             -- 0-100 (happiness)
-    tempo REAL,                  -- BPM
-    loudness REAL,               -- dBFS
-    danceability INTEGER,        -- 0-100
-    acousticness INTEGER,        -- 0-100
-    mood TEXT,                   -- energetic|happy|sad|stress|angry
-    intensity INTEGER,           -- 1|2|3 (low|medium|high)
-    mood_score REAL,             -- 0-100 (sortable index)
+- song_id: Khóa chính
+- title, artist, genre: Thông tin bài hát
+- energy: Năng lượng 0-100
+- valence: Mức vui vẻ 0-100
+- tempo: Tốc độ BPM
+- loudness: Công suất âm thanh dBFS
+- danceability: Khả năng nhảy 0-100
+- acousticness: Mức acoustic 0-100
+- mood: Tâm trạng dự đoán
+- intensity: Mức độ cường độ 1-3
+- mood_score: Điểm tâm trạng 0-100 dùng để sắp xếp
+- valence_score, arousal_score, mood_confidence: Debug columns
 
-    -- Debug columns (optional)
-    valence_score REAL,          -- Model's computed valence 0-100
-    arousal_score REAL,          -- Model's computed arousal 0-100
-    mood_confidence REAL         -- Model confidence 0-1
-);
-```
+## Nguồn Dữ Liệu
 
-## Data Sources
+Có thể lấy từ:
 
-You can populate this database from:
-
-- **Spotify API**: energy, valence, tempo, danceability, acousticness
-- **TuneBat API**: music features and mood annotations
-- **Last.fm API**: Genre and metadata
-- **Manual CSV import**: For testing or custom data
+- Spotify API: đặc điểm âm thanh
+- TuneBat API: đặc điểm nhạc và phân loại tâm trạng
+- Last.fm API: thể loại và metadata
+- Import CSV: dữ liệu riêng

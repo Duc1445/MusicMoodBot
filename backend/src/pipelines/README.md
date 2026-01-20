@@ -1,143 +1,107 @@
-# Pipelines Module
+# Mô-đun Pipelines
 
-Machine learning model implementations for mood prediction.
+Các mô hình học máy để dự đoán tâm trạng.
 
-## Files
+## Các File
 
-### mood_engine.py
+**mood_engine.py**
 
-Core mood prediction model with Valence-Arousal (VA) + probabilistic prototypes approach.
+Mô hình chính sử dụng Valence-Arousal + xác suất Gaussian.
 
-#### Classes
+### Các Lớp Chính:
 
-**EngineConfig**
+**EngineConfig:** Cấu hình tham số mô hình
 
-- Configuration dataclass for model parameters
-- Tempo normalization bounds
-- Feature weights for arousal calculation (energy, tempo, loudness, danceability, acousticness)
-- Feature weights for valence calculation (happiness, danceability)
-- Prototype training parameters
-- Intensity level thresholds
-- Genre adaptation settings
+- Giới hạn chuẩn hóa tốc độ
+- Trọng số các đặc điểm cho tính kích thích
+- Trọng số các đặc điểm cho tính vui vẻ
+- Tham số huấn luyện prototype
+- Ngưỡng mức độ cường độ
+- Cấu hình thích ứng thể loại
 
-**Prototype2D**
+**Prototype2D:** Đại diện Gaussian của tâm trạng
 
-- 2D Gaussian representation of a mood
-- Tracks mean (μ) and standard deviation (σ) for valence and arousal
-- Computes log-likelihood for probabilistic mood classification
+- Lưu giá trị trung bình và độ lệch chuẩn
+- Tính log-likelihood cho phân loại
 
-**MoodEngine**
+**MoodEngine:** Lớp mô hình chính
 
-- Main model class
-- Methods:
-  - `fit(songs)`: Train model on songs data
-  - `predict(song)`: Predict mood for a single song
-  - `mood_probabilities(song, v, a)`: Get probability distribution over moods
-  - `infer_intensity_int(arousal)`: Map arousal to intensity level (1-3)
-  - `valence_score(song)`: Compute valence (happiness) from song features
-  - `arousal_score(song)`: Compute arousal from song features
+- fit(songs): Huấn luyện mô hình
+- predict(song): Dự đoán tâm trạng
+- mood_probabilities(song, v, a): Xác suất cho mỗi tâm trạng
+- infer_intensity_int(arousal): Chuyển kích thích thành mức độ 1-3
+- valence_score(song): Tính vui vẻ
+- arousal_score(song): Tính kích thích
 
-#### Model Logic
+### Logic Mô Hình:
 
-**Valence Calculation**
+**Tính Vui Vẻ:**
 
-- Weighted combination of: happiness (0.85) + danceability (0.15)
+Kết hợp: mức vui vẻ (85%) + khả năng nhảy (15%)
 
-**Arousal Calculation**
+**Tính Kích Thích:**
 
-- Weighted combination of:
-  - Energy (0.45)
-  - Tempo normalized to 0-100 (0.20)
-  - Loudness normalized from dBFS (0.20)
-  - Danceability (0.10)
-  - Minus acousticness penalty (0.05)
+Kết hợp:
 
-**Mood Classification**
+- Năng lượng 45%
+- Tốc độ chuẩn hóa 20%
+- Công suất âm thanh chuẩn hóa 20%
+- Khả năng nhảy 10%
+- Trừ acoustic 5%
 
-1. Bootstrap weak labels from VA coordinates:
-   - Energetic: High V, High A
-   - Happy: High V, Low A
-   - Sad: Low V, Low A
-   - Stress: Low V, High A (default)
-   - Angry: Low V, High A (if loud + fast)
+**Phân Loại Tâm Trạng:**
 
-2. Fit 2D Gaussian prototypes per mood
+1. Tạo nhãn yếu từ vui vẻ và kích thích
+   - Sôi động: Vui vẻ cao, Kích thích cao
+   - Vui vẻ: Vui vẻ cao, Kích thích thấp
+   - Buồn: Vui vẻ thấp, Kích thích thấp
+   - Lo lắng: Vui vẻ thấp, Kích thích cao
+   - Tức giận: Vui vẻ thấp, Kích thích cao + công suất cao
 
-3. Use probabilistic approach to classify new songs
+2. Huấn luyện Gaussian prototype cho mỗi tâm trạng
 
-4. Support genre-specific prototypes (optional)
+3. Dùng xác suất để phân loại bài hát mới
 
-## Usage
+4. Hỗ trợ prototype riêng cho từng thể loại
+
+## Cách Sử Dụng
+
+Tạo mô hình với cấu hình mặc định:
 
 ```python
 from backend.src.pipelines.mood_engine import MoodEngine, EngineConfig
-
-# Create model with default config
 engine = MoodEngine()
+```
 
-# Or use custom config
+Hoặc cấu hình tùy chỉnh:
+
+```python
 cfg = EngineConfig(
-    w_energy=0.5,  # Increase energy weight
+    w_energy=0.5,
     use_genre_tokens=True
 )
 engine = MoodEngine(cfg=cfg)
+```
 
-# Train on songs
+Huấn luyện mô hình:
+
+```python
 engine.fit(songs)
+```
 
-# Predict mood for a song
+Dự đoán tâm trạng:
+
+```python
 song = {"energy": 80, "valence": 70, "tempo": 120, ...}
 result = engine.predict(song)
 print(result)
-# Output:
-# {
-#   "mood": "energetic",
-#   "intensity": 3,
-#   "mood_score": 75.0,
-#   "valence_score": 70.0,
-#   "arousal_score": 80.0,
-#   "mood_confidence": 0.87
-# }
 ```
 
-## Feature Requirements
+Kết quả trả về:
 
-Songs must include these features:
-
-- `energy`: 0-100 (can be Spotify-like 0-1)
-- `valence`: 0-100 (happiness)
-- `tempo`: BPM (beats per minute)
-- `loudness`: dBFS or 0-100
-- `danceability`: 0-100
-- `acousticness`: 0-100
-- `genre` (optional): For genre-based prototypes
-
-## Customization
-
-### Change Mood Thresholds
-
-```python
-cfg = EngineConfig(
-    angry_loudness_hi=80.0,  # Increase threshold for "angry" classification
-    angry_tempo_hi=75.0
-)
-```
-
-### Adjust Feature Weights
-
-```python
-cfg = EngineConfig(
-    w_energy=0.6,        # Increase importance of energy
-    w_acoustic_penalty=0.1  # Reduce acousticness penalty
-)
-```
-
-### Genre Adaptation
-
-```python
-cfg = EngineConfig(
-    use_genre_tokens=True,   # Enable genre-specific prototypes
-    genre_min_count=50,      # Minimum songs per genre
-    genre_weight=0.6         # Blend 40% global + 60% genre
-)
-```
+- mood: sôi động
+- intensity: 3
+- mood_score: 75.0
+- valence_score: 70.0
+- arousal_score: 80.0
+- mood_confidence: 0.87

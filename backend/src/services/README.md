@@ -1,93 +1,85 @@
-# Services Module
+# Mô-đun Services
 
-Core business logic and orchestration layer for the music mood engine.
+Lớp xử lý nghiệp vụ chính và điều phối công cụ phân loại tâm trạng.
 
-## Module Files
+## Các File
 
-### constants.py
+**constants.py**
 
-Shared type definitions and constants:
+- Song: Kiểu dữ liệu bài hát
+- MOODS: Danh sách 5 loại tâm trạng
+- TABLE_SONGS: Tên bảng trong cơ sở dữ liệu
 
-- `Song`: Type alias for song dictionary
-- `MOODS`: List of available mood categories ("energetic", "happy", "sad", "stress", "angry")
-- `TABLE_SONGS`: Database table name
+**helpers.py**
 
-### helpers.py
+Các hàm tiện ích để xử lý dữ liệu:
 
-Pure utility functions for data normalization and processing:
+- \_is_missing(): Kiểm tra giá trị bị thiếu
+- \_to_float(): Chuyển đổi an toàn thành số thực
+- clamp(): Giới hạn giá trị trong khoảng
+- percentile(): Tính phần trăm
+- robust_minmax(): Chuẩn hóa 0-100
+- coerce_0_100(): Chuyển đổi giữa các tỷ lệ
+- normalize_loudness_to_0_100(): Xử lý công suất âm thanh
+- softmax(): Tính xác suất
+- tokenize_genre(): Phân tích chuỗi thể loại
 
-- **\_is_missing()**: Check if value is None or NaN
-- **\_to_float()**: Safe float conversion with fallback
-- **clamp()**: Constrain value to range
-- **percentile()**: Calculate percentile without numpy
-- **robust_minmax()**: Normalize to 0-100 scale
-- **coerce_0_100()**: Convert 0-1 or 0-100 scales to consistent 0-100
-- **normalize_loudness_to_0_100()**: Handle dBFS to 0-100 conversion
-- **softmax()**: Compute probability distribution from logits
-- **tokenize_genre()**: Parse mixed genre strings (e.g., "ballad+rock, pop")
+**mood_services.py**
 
-### mood_services.py
+Lớp DBMoodEngine chính:
 
-High-level mood prediction service:
+- fit(): Huấn luyện mô hình
+- predict_one(): Dự đoán tâm trạng một bài hát
+- update_one(): Cập nhật cơ sở dữ liệu
+- update_missing(): Cập nhật bài hát chưa có tâm trạng
+- update_all(): Tính toán lại tất cả
+- Tự động huấn luyện lại khi số bài hát thay đổi
 
-- **DBMoodEngine**: Main service class with caching
-  - `fit()`: Fit model to all songs in database
-  - `predict_one()`: Predict mood for a single song
-  - `update_one()`: Update database with prediction for one song
-  - `update_missing()`: Update all songs with NULL mood values
-  - `update_all()`: Recompute all songs
-  - Auto-refitting when song count changes
+**history_service.py**
 
-### history_service.py
+- Lưu trữ lịch sử dự đoán tâm trạng
+- Phân tích xu hướng
 
-Manage song mood history and tracking:
+**ranking_service.py**
 
-- Stores mood prediction history for songs
-- Enables trend analysis and tracking mood changes
+- Sắp xếp bài hát theo tâm trạng
+- Lọc theo mức độ cường độ
+- Các thuật toán xếp hạng tùy chỉnh
 
-### ranking_service.py
-
-Rank songs based on mood criteria:
-
-- Sort by mood type
-- Filter by intensity level
-- Custom ranking algorithms
-
-## Usage Example
+## Ví Dụ Sử Dụng
 
 ```python
 from backend.src.services.mood_services import DBMoodEngine
 
-# Create engine with automatic model refitting
 engine = DBMoodEngine(
     db_path="music.db",
-    add_debug_cols=True,      # Store valence/arousal scores
-    auto_fit=True,            # Auto-fit model on first use
-    refit_on_change=True      # Re-fit if song count changes
+    add_debug_cols=True,
+    auto_fit=True,
+    refit_on_change=True
 )
 
-# Fit model to current data
+# Huấn luyện mô hình
 engine.fit(force=True)
 
-# Update songs with NULL mood values
+# Cập nhật bài hát chưa có tâm trạng
 count = engine.update_missing()
-print(f"Updated {count} rows")
+print(f"Cập nhật {count} bài")
 
-# Update all songs
+# Tính toán lại tất cả
 count = engine.update_all()
-print(f"Recomputed {count} songs")
+print(f"Tính toán {count} bài hát")
 
-# Predict mood for a single song
+# Dự đoán tâm trạng
 song_dict = {"energy": 80, "valence": 70, "tempo": 120, ...}
 result = engine.predict_one(song_dict)
-print(f"Mood: {result['mood']}, Intensity: {result['intensity']}")
+print(f"Tâm trạng: {result['mood']}, Cường độ: {result['intensity']}")
 ```
 
-## Configuration
+## Cấu Hình
 
-Customize model behavior via `EngineConfig` in mood_engine.py:
+Tùy chỉnh hành vi mô hình qua EngineConfig:
 
-- Tempo normalization bounds
-- Feature weights (energy, tempo, loudness, danceability)
-- Intensity thresholds
-- Genre token adaptation parameters
+- Giới hạn chuẩn hóa tốc độ
+- Trọng số các đặc điểm âm thanh
+- Ngưỡng mức độ cường độ
+- Cấu hình thích ứng thể loại
