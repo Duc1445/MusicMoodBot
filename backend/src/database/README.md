@@ -66,9 +66,6 @@ Bảng songs chứa các cột:
 
 ## Nguồn Dữ Liệu
 
-Có thể lấy từ:
-
-- Spotify API: đặc điểm âm thanh
-- TuneBat API: đặc điểm nhạc và phân loại tâm trạng
-- Last.fm API: thể loại và metadata
+Lấy từ:
+- TuneBat API: đặc điểm âm thanh, đặc điểm nhạc và phân loại tâm trạng
 - Import CSV: dữ liệu riêng

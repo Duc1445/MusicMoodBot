@@ -1,0 +1,21 @@
+Name,Description,List,Labels,Estimate (hours),Actual (hours),Status,Completed Date,Assigned
+Project Planning & Setup,Environment setup + structure design + requirements,CONCEIVE,Setup,2.4,2.4,Completed,2026-01-21,Sinh viên
+Architecture Design,9-layer architecture + module interfaces,CONCEIVE,Architecture,2,2,Completed,2026-01-21,Sinh viên
+Database Schema Design,21-column schema + audio features + computed fields,CONCEIVE,Database,1.2,1.2,Completed,2026-01-21,Sinh viên
+ML Algorithm Research,Valence-Arousal model + classification logic,CONCEIVE,ML,2.4,2.4,Completed,2026-01-21,Sinh viên
+Database Implementation,init_db.py + migration + seed + bulk update,DESIGN,Database,3.6,3.6,Completed,2026-01-21,Sinh viên
+API Contract Design,13 REST endpoints + schemas,DESIGN,API,2.4,2.4,Completed,2026-01-21,Sinh viên
+Search Engine Design,TF-IDF planning + index strategy,DESIGN,Search,1.2,1.2,Completed,2026-01-21,Sinh viên
+ML Model Design,Logistic Regression + preference tracking,DESIGN,ML,1.8,1.8,Completed,2026-01-21,Sinh viên
+Backend Refactoring,Refactor monolith into 11 modules,IMPLEMENT,Backend,9.6,9.6,Completed,2026-01-21,Sinh viên
+Mood Prediction Engine,VA algorithm + feature normalization + mood classification,IMPLEMENT,ML,7.8,7.8,Completed,2026-01-21,Sinh viên
+REST API Development,13 endpoints + validation + Swagger UI,IMPLEMENT,API,9.6,9.6,Completed,2026-01-21,Sinh viên
+TF-IDF Search Engine,TfidfVectorizer + indexing + filtering + suggestions,IMPLEMENT,Search,5.4,5.4,Completed,2026-01-21,Sinh viên
+Logistic Regression Model,PreferenceModel + UserPreferenceTracker,IMPLEMENT,ML,6,6,Completed,2026-01-21,Sinh viên
+Repository Layer,Song repo + history repo + connection management,IMPLEMENT,Backend,2.4,2.4,Completed,2026-01-21,Sinh viên
+Services Layer,DBMoodEngine + state management + error handling,IMPLEMENT,Backend,2.4,2.4,Completed,2026-01-21,Sinh viên
+Integration & Module Testing,End-to-end API + database + search + performance testing,IMPLEMENT,Testing,6,6,Completed,2026-01-21,Sinh viên
+Documentation,README files + schema guide + project components,OPERATE,Documentation,5.4,5.4,Completed,2026-01-21,Sinh viên
+DevOps & Configuration,GitHub + requirements.txt + .gitignore + .env,OPERATE,DevOps,2.4,2.4,Completed,2026-01-21,Sinh viên
+Bug Fixes & Optimization,Database paths + imports + API validation + caching,OPERATE,Bugfix,5.4,5.4,Completed,2026-01-21,Sinh viên
+Final Testing & Validation,Load data + test endpoints + verify predictions,OPERATE,Testing,2,2,Completed,2026-01-21,Sinh viên

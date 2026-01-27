@@ -44,7 +44,7 @@ class TFIDFSearchEngine:
         """
         self.songs = songs
         
-        # Create documents: combine title, artist, genre, mood, intensity
+        # Create documents: combine song_name, artist, genre, mood, intensity
         documents = []
         for song in songs:
             doc = self._create_document(song)
@@ -65,7 +65,7 @@ class TFIDFSearchEngine:
     def _create_document(self, song: Dict) -> str:
         """Create searchable document from song metadata."""
         parts = [
-            song.get('title', ''),
+            song.get('song_name', ''),
             song.get('artist', ''),
             song.get('genre', ''),
             song.get('mood', ''),
@@ -163,13 +163,13 @@ class TFIDFSearchEngine:
         prefix_lower = prefix.lower()
         
         for song in self.songs:
-            title = song.get('title', '').lower()
+            song_name = song.get('song_name', '').lower()
             artist = song.get('artist', '').lower()
             
-            if title.startswith(prefix_lower):
-                suggestions.append(f"{song['title']} - {song['artist']}")
+            if song_name.startswith(prefix_lower):
+                suggestions.append(f"{song['song_name']} - {song['artist']}")
             elif artist.startswith(prefix_lower):
-                suggestions.append(f"{song['title']} - {song['artist']}")
+                suggestions.append(f"{song['song_name']} - {song['artist']}")
         
         # Remove duplicates
         suggestions = list(dict.fromkeys(suggestions))

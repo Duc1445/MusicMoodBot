@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Dict, Optional, Tuple
+import os
 
 from backend.src.services.mood_services import DBMoodEngine
 from backend.src.services.constants import MOODS, Song
@@ -16,11 +17,18 @@ _search_engine: Optional[TFIDFSearchEngine] = None
 _user_trackers: Dict[str, UserPreferenceTracker] = {}
 
 
+def get_db_path() -> str:
+    """Get absolute path to music.db in backend/src/database directory."""
+    current_file = os.path.abspath(__file__)
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+    return os.path.join(backend_dir, "src", "database", "music.db")
+
+
 def get_engine() -> DBMoodEngine:
     """Get or create the mood engine instance."""
     global _engine
     if _engine is None:
-        _engine = DBMoodEngine(db_path="music.db", add_debug_cols=True, auto_fit=True)
+        _engine = DBMoodEngine(db_path=get_db_path(), add_debug_cols=True, auto_fit=True)
         _engine.fit(force=True)
     return _engine
 
@@ -30,7 +38,7 @@ def get_search_engine() -> TFIDFSearchEngine:
     global _search_engine
     if _search_engine is None:
         from backend.src.repo.song_repo import connect, fetch_songs
-        con = connect("music.db")
+        con = connect(get_db_path())
         songs = fetch_songs(con)
         con.close()
         _search_engine = create_search_engine(songs)
@@ -76,7 +84,7 @@ def predict_mood(song: Song) -> Dict[str, object]:
 @router.get("/songs/by-mood/{mood}")
 def get_songs_by_mood(
     mood: str,
-    db_path: str = Query("music.db")
+    db_path: str = Query(None)
 ) -> List[Dict]:
     """Get all songs with a specific mood."""
     if mood not in MOODS:
@@ -84,6 +92,8 @@ def get_songs_by_mood(
     
     try:
         from backend.src.repo.song_repo import connect, fetch_songs
+        if db_path is None:
+            db_path = get_db_path()
         con = connect(db_path)
         songs = fetch_songs(con, "mood = ?", (mood,))
         con.close()
@@ -93,12 +103,14 @@ def get_songs_by_mood(
 
 
 @router.post("/update-missing")
-def update_missing_moods(db_path: str = Query("music.db")) -> Dict[str, object]:
+def update_missing_moods(db_path: str = Query(None)) -> Dict[str, object]:
     """
     Update all songs with NULL mood/intensity values.
     Re-fits model on current data.
     """
     try:
+        if db_path is None:
+            db_path = get_db_path()
         engine = DBMoodEngine(db_path=db_path, add_debug_cols=True)
         engine.fit(force=True)
         count = engine.update_missing()
@@ -112,12 +124,14 @@ def update_missing_moods(db_path: str = Query("music.db")) -> Dict[str, object]:
 
 
 @router.post("/update-all")
-def recompute_all_moods(db_path: str = Query("music.db")) -> Dict[str, object]:
+def recompute_all_moods(db_path: str = Query(None)) -> Dict[str, object]:
     """
     Recompute mood predictions for ALL songs.
     This will overwrite existing predictions.
     """
     try:
+        if db_path is None:
+            db_path = get_db_path()
         engine = DBMoodEngine(db_path=db_path, add_debug_cols=True)
         engine.fit(force=True)
         count = engine.update_all()
@@ -147,10 +161,12 @@ def list_available_moods() -> Dict[str, List[str]]:
 
 
 @router.get("/stats")
-def get_db_stats(db_path: str = Query("music.db")) -> Dict[str, object]:
+def get_db_stats(db_path: str = Query(None)) -> Dict[str, object]:
     """Get database statistics."""
     try:
         from backend.src.repo.song_repo import connect, fetch_songs
+        if db_path is None:
+            db_path = get_db_path()
         con = connect(db_path)
         
         all_songs = fetch_songs(con)
@@ -180,7 +196,7 @@ def get_db_stats(db_path: str = Query("music.db")) -> Dict[str, object]:
 def search_songs(
     query: str = Query(..., min_length=1, description="Search query (title, artist, genre, mood)"),
     top_k: int = Query(10, ge=1, le=50, description="Number of results"),
-    db_path: str = Query("music.db")
+    db_path: str = Query(None)
 ) -> List[Dict]:
     """
     Full-text search for songs using TF-IDF.
@@ -209,7 +225,7 @@ def search_songs(
 def search_by_mood(
     mood: str,
     top_k: int = Query(10, ge=1, le=50),
-    db_path: str = Query("music.db")
+    db_path: str = Query(None)
 ) -> List[Dict]:
     """Search for songs with specific mood."""
     if mood not in MOODS:
@@ -217,6 +233,8 @@ def search_by_mood(
     
     try:
         from backend.src.repo.song_repo import connect, fetch_songs
+        if db_path is None:
+            db_path = get_db_path()
         con = connect(db_path)
         songs = fetch_songs(con, "mood = ?", (mood,))
         con.close()
@@ -229,7 +247,7 @@ def search_by_mood(
 def search_by_genre(
     genre: str,
     top_k: int = Query(10, ge=1, le=50),
-    db_path: str = Query("music.db")
+    db_path: str = Query(None)
 ) -> List[Dict]:
     """Search for songs with specific genre."""
     try:
@@ -270,7 +288,7 @@ def record_preference(
     user_id: str,
     song_id: int,
     preference: int = Query(..., ge=0, le=1, description="0=dislike, 1=like"),
-    db_path: str = Query("music.db")
+    db_path: str = Query(None)
 ) -> Dict[str, object]:
     """
     Record user preference for a song.
@@ -287,6 +305,8 @@ def record_preference(
         from backend.src.repo.song_repo import connect, fetch_song_by_id
         
         # Get song
+        if db_path is None:
+            db_path = get_db_path()
         con = connect(db_path)
         song = fetch_song_by_id(con, song_id)
         con.close()
@@ -312,7 +332,7 @@ def record_preference(
 @router.post("/user/{user_id}/train")
 def train_preference_model(
     user_id: str,
-    db_path: str = Query("music.db")
+    db_path: str = Query(None)
 ) -> Dict[str, object]:
     """
     Train preference model from user feedback.
@@ -346,7 +366,7 @@ def train_preference_model(
 def predict_user_preference(
     user_id: str,
     song_id: int,
-    db_path: str = Query("music.db")
+    db_path: str = Query(None)
 ) -> Dict[str, object]:
     """
     Predict if user will like a song.
@@ -358,6 +378,9 @@ def predict_user_preference(
     try:
         from backend.src.repo.song_repo import connect, fetch_song_by_id
         
+        # Get song
+        if db_path is None:
+            db_path = get_db_path()
         # Get song
         con = connect(db_path)
         song = fetch_song_by_id(con, song_id)
@@ -416,7 +439,7 @@ def get_user_stats(user_id: str) -> Dict[str, object]:
 def recommend_for_user(
     user_id: str,
     top_k: int = Query(10, ge=1, le=50),
-    db_path: str = Query("music.db")
+    db_path: str = Query(None)
 ) -> List[Dict]:
     """
     Get song recommendations for user based on preferences.
@@ -435,6 +458,8 @@ def recommend_for_user(
             }
         
         # Get all songs
+        if db_path is None:
+            db_path = get_db_path()
         con = connect(db_path)
         all_songs = fetch_songs(con)
         con.close()

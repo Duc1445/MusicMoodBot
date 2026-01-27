@@ -1,13 +1,25 @@
 """Seed database with sample song data for testing and development."""
 
 import sqlite3
+import os
 from typing import Optional
 
 
 def seed_songs(
-    db_path: str = "music.db",
+    db_path: Optional[str] = None,
     clear_existing: bool = False
 ) -> int:
+    """
+    Seed database with sample songs.
+    
+    Args:
+        db_path: Path to database file. If None, uses backend/music.db
+        clear_existing: Whether to clear existing songs before seeding
+    """
+    if db_path is None:
+        # Use absolute path from backend directory
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        db_path = os.path.join(backend_dir, "music.db")
     """
     Seed database with sample songs for testing.
     

@@ -159,7 +159,7 @@ class PreferenceModel:
     def _extract_features(self, songs: List[Dict]) -> np.ndarray:
         """Extract numerical features from songs."""
         feature_keys = [
-            'energy', 'valence', 'tempo', 'loudness',
+            'energy', 'happiness', 'tempo', 'loudness',
             'danceability', 'acousticness', 'intensity'
         ]
         
@@ -168,10 +168,16 @@ class PreferenceModel:
         
         features = []
         for song in songs:
-            values = [
-                float(song.get(key, 50))  # Default to 50 if missing
-                for key in feature_keys
-            ]
+            values = []
+            for key in feature_keys:
+                val = song.get(key, 50)
+                # Handle empty strings and None values
+                if val is None or val == '':
+                    val = 50
+                try:
+                    values.append(float(val))
+                except (ValueError, TypeError):
+                    values.append(50.0)  # Default to 50 if conversion fails
             features.append(values)
         
         return np.array(features)
@@ -223,7 +229,6 @@ class UserPreferenceTracker:
         """
         if preference not in [0, 1]:
             raise ValueError("Preference must be 0 or 1")
-        
         self.feedback.append((song, preference))
     
     def retrain(self) -> None:
