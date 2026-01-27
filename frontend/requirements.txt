@@ -1,1 +1,11 @@
+# Flet UI Framework
 flet==0.80.2
+
+# API Communication
+requests>=2.31.0
+
+# Security (for password hashing fallback)
+hashlib
+
+# Utilities
+python-dateutil>=2.8.0

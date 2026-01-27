@@ -163,6 +163,8 @@ class PreferenceModel:
             'danceability', 'acousticness', 'intensity'
         ]
         
+        # Also check for 'valence' as alternative to 'happiness'
+        
         if not self.feature_names:
             self.feature_names = feature_keys
         
@@ -170,12 +172,26 @@ class PreferenceModel:
         for song in songs:
             values = []
             for key in feature_keys:
-                val = song.get(key, 50)
+                val = song.get(key)
+                
+                # Special case: use 'valence' if 'happiness' is missing
+                if key == 'happiness' and (val is None or val == ''):
+                    val = song.get('valence', 50)
+                
                 # Handle empty strings and None values
                 if val is None or val == '':
                     val = 50
                 try:
-                    values.append(float(val))
+                    float_val = float(val)
+                    # Handle special cases for different scales
+                    if key == 'tempo':
+                        # Normalize tempo to 0-100 range (assuming 50-200 BPM range)
+                        float_val = max(0, min(100, (float_val - 50) / 1.5))
+                    elif key == 'loudness':
+                        # Normalize loudness from dBFS (-60 to 0) to 0-100
+                        if float_val <= 0:
+                            float_val = max(0, min(100, (float_val + 60) / 0.6))
+                    values.append(float_val)
                 except (ValueError, TypeError):
                     values.append(50.0)  # Default to 50 if conversion fails
             features.append(values)

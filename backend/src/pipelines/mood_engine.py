@@ -105,9 +105,20 @@ class MoodEngine:
         )
 
     def valence_score(self, song: Song) -> Number:
-        happiness = coerce_0_100(_to_float(song.get("happiness")), default=50.0)
+        # Support both 'happiness' (TuneBat) and 'valence' (Spotify) fields
+        happiness = _to_float(song.get("happiness"))
+        valence = _to_float(song.get("valence"))
+        
+        # Use whichever is available, prefer 'valence' if both exist
+        if valence is not None:
+            happiness_val = coerce_0_100(valence, default=50.0)
+        elif happiness is not None:
+            happiness_val = coerce_0_100(happiness, default=50.0)
+        else:
+            happiness_val = 50.0
+            
         dance = coerce_0_100(_to_float(song.get("danceability")), default=50.0)
-        v = self.cfg.w_valence_happiness * happiness + self.cfg.w_valence_dance * dance
+        v = self.cfg.w_valence_happiness * happiness_val + self.cfg.w_valence_dance * dance
         return clamp(v, 0.0, 100.0)
 
     def arousal_score(self, song: Song) -> Number:

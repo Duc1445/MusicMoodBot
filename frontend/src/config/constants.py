@@ -1,5 +1,6 @@
 """
 Configuration and constants for MusicMoodBot frontend
+Enhanced with API integration support
 """
 
 # ================== COLORS ==================
@@ -16,6 +17,8 @@ COLORS = {
     "mood_happy": "#BFEFC9",
     "date_yellow": "#F6D25C",
     "light_gray": "#EFEFEF",
+    "primary_accent": "#00D9FF",
+    "secondary_accent": "#FF6B9D",
 }
 
 # ================== MOOD & INTENSITY ==================
@@ -28,13 +31,63 @@ MOOD_EMOJI = {
     "Buồn": "😢",
     "Suy tư": "🧠",
     "Chill": "😎",
-    "Năng lượng": "⚡"
+    "Năng lượng": "⚡",
+    # English variants
+    "happy": "😊",
+    "sad": "😢",
+    "stress": "🧠",
+    "energetic": "⚡",
+    "angry": "😠"
 }
 
 INTENSITY_EMOJI = {
     "Nhẹ": "🌿",
     "Vừa": "✨",
-    "Mạnh": "🔥"
+    "Mạnh": "🔥",
+    "low": "🌿",
+    "medium": "✨",
+    "high": "🔥"
+}
+
+# ================== MOOD MAPPING ==================
+# Map Vietnamese moods to English (for API calls)
+MOOD_VI_TO_EN = {
+    "Vui": "happy",
+    "Buồn": "sad",
+    "Suy tư": "stress",
+    "Chill": "happy",
+    "Năng lượng": "energetic"
+}
+
+# Map English moods to Vietnamese (for display)
+MOOD_EN_TO_VI = {
+    "happy": "Vui",
+    "sad": "Buồn",
+    "stress": "Suy tư",
+    "energetic": "Năng lượng",
+    "angry": "Năng lượng"
+}
+
+# Intensity mapping
+INTENSITY_VI_TO_EN = {
+    "Nhẹ": "low",
+    "Vừa": "medium",
+    "Mạnh": "high"
+}
+
+INTENSITY_EN_TO_VI = {
+    "low": "Nhẹ",
+    "medium": "Vừa",
+    "high": "Mạnh"
+}
+
+# ================== MOOD COLORS ==================
+MOOD_COLORS = {
+    "Vui": "#FFD93D",
+    "Buồn": "#6C9BCF",
+    "Suy tư": "#9B59B6",
+    "Chill": "#26D07C",
+    "Năng lượng": "#FF6B6B"
 }
 
 # ================== SAMPLE SONGS ==================
@@ -90,10 +143,36 @@ SAMPLE_SONGS = [
 ]
 
 # ================== APP INFO ==================
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 APP_NAME = "MusicMoodBot"
+APP_DESCRIPTION = "Gợi ý nhạc theo tâm trạng với AI thông minh"
 
 # ================== CHAT STATES ==================
 CHAT_STATE_AWAIT_MOOD = "await_mood"
 CHAT_STATE_AWAIT_INTENSITY = "await_intensity"
 CHAT_STATE_CHATTING = "chatting"
+
+# ================== API CONFIGURATION ==================
+API_BASE_URL = "http://localhost:8000/api/moods"
+API_TIMEOUT = 10  # seconds
+
+# ================== FEATURE FLAGS ==================
+FEATURES = {
+    "smart_recommendation": True,
+    "text_mood_detection": True,
+    "vietnamese_search": True,
+    "user_preferences": True,
+    "password_hashing": True,
+    "state_persistence": True
+}
+
+# ================== BOT MESSAGES ==================
+BOT_MESSAGES = {
+    "welcome": "Xin chào! Mình là MusicMoodBot 🎵\nHôm nay bạn đang cảm thấy thế nào?",
+    "ask_mood": "Bạn đang có tâm trạng như thế nào?",
+    "ask_intensity": "Ok. Bạn muốn intensity mức nào? (Nhẹ / Vừa / Mạnh)",
+    "thinking": "Bot đang suy nghĩ...",
+    "not_understood": "Mình chưa hiểu ý bạn. Hãy chọn 1 mood bằng nút bên dưới.",
+    "try_again": "Được rồi, mình thử gợi ý bài khác nhé!",
+    "error": "Oops! Có lỗi xảy ra. Vui lòng thử lại."
+}

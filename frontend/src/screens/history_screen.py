@@ -94,7 +94,7 @@ def create_history_screen(on_chat_click, on_profile_click):
             ft.Container(
                 height=55,
                 border_radius=RADIUS_MEDIUM,
-                gradient=ft.LinearGradient([PRIMARY_ACCENT, PRIMARY_ACCENT_DARK]),
+                gradient=ft.LinearGradient(colors=[PRIMARY_ACCENT, PRIMARY_ACCENT_DARK], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
                 on_click=on_chat_click,
                 content=ft.Row(
                     spacing=SPACING_XS,
@@ -109,7 +109,7 @@ def create_history_screen(on_chat_click, on_profile_click):
             ft.Container(
                 height=55,
                 border_radius=RADIUS_MEDIUM,
-                gradient=ft.LinearGradient(["#00D9FF", "#0099CC"]),
+                gradient=ft.LinearGradient(colors=["#00D9FF", "#0099CC"], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
                 on_click=lambda e: load_history(),
                 content=ft.Row(
                     spacing=SPACING_XS,
@@ -124,7 +124,7 @@ def create_history_screen(on_chat_click, on_profile_click):
             ft.Container(
                 height=55,
                 border_radius=RADIUS_MEDIUM,
-                gradient=ft.LinearGradient(["#FF6B9D", "#C44569"]),
+                gradient=ft.LinearGradient(colors=["#FF6B9D", "#C44569"], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
                 on_click=on_profile_click,
                 content=ft.Row(
                     spacing=SPACING_XS,

@@ -68,7 +68,7 @@ def seed_songs(
         for title, artist, genre, energy, valence, tempo, loudness, danceability, acousticness in sample_songs:
             cur.execute("""
                 INSERT OR IGNORE INTO songs 
-                (title, artist, genre, energy, valence, tempo, loudness, danceability, acousticness)
+                (song_name, artist, genre, energy, happiness, tempo, loudness, danceability, acousticness)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (title, artist, genre, energy, valence, tempo, loudness, danceability, acousticness))
         

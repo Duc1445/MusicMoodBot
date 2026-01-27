@@ -369,7 +369,7 @@ def create_chat_screen(page, on_history_click, on_profile_click):
                     ft.Container(
                         height=50,
                         border_radius=RADIUS_MEDIUM,
-                        gradient=ft.LinearGradient([PRIMARY_ACCENT, PRIMARY_ACCENT_DARK]),
+                        gradient=ft.LinearGradient(colors=[PRIMARY_ACCENT, PRIMARY_ACCENT_DARK], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
                         content=ft.Row(
                             spacing=SPACING_SM,
                             alignment=ft.MainAxisAlignment.CENTER,
@@ -380,7 +380,7 @@ def create_chat_screen(page, on_history_click, on_profile_click):
                     ft.Container(
                         height=50,
                         border_radius=RADIUS_MEDIUM,
-                        gradient=ft.LinearGradient([INFO, PRIMARY_ACCENT]),
+                        gradient=ft.LinearGradient(colors=[INFO, PRIMARY_ACCENT], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
                         on_click=on_history_click,
                         content=ft.Row(
                             spacing=SPACING_SM,
@@ -392,7 +392,7 @@ def create_chat_screen(page, on_history_click, on_profile_click):
                     ft.Container(
                         height=50,
                         border_radius=RADIUS_MEDIUM,
-                        gradient=ft.LinearGradient([MOOD_VUI, WARNING]),
+                        gradient=ft.LinearGradient(colors=[MOOD_VUI, WARNING], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
                         on_click=on_profile_click,
                         content=ft.Row(
                             spacing=SPACING_SM,
@@ -404,7 +404,7 @@ def create_chat_screen(page, on_history_click, on_profile_click):
                     ft.Container(
                         height=50,
                         border_radius=RADIUS_MEDIUM,
-                        gradient=ft.LinearGradient([ERROR, WARNING]),
+                        gradient=ft.LinearGradient(colors=[ERROR, WARNING], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
                         on_click=on_reset_click,
                         content=ft.Row(
                             spacing=SPACING_SM,

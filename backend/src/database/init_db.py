@@ -52,6 +52,37 @@ CREATE TABLE IF NOT EXISTS recommendation_history (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS listening_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    song_id INTEGER NOT NULL,
+    mood TEXT,
+    rating INTEGER DEFAULT 0,
+    liked INTEGER DEFAULT 0,
+    play_count INTEGER DEFAULT 1,
+    last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (song_id) REFERENCES songs(song_id)
+)
+""")
+
+cursor.execute("""
+CREATE INDEX IF NOT EXISTS idx_history_user 
+ON listening_history(user_id, last_played DESC)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    email TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP
+)
+""")
+
 conn.commit()
 
 # Add missing columns to existing database if upgrading
@@ -87,6 +118,11 @@ except:
 
 try:
     cursor.execute("ALTER TABLE songs ADD COLUMN mood_confidence REAL")
+except:
+    pass
+
+try:
+    cursor.execute("ALTER TABLE songs ADD COLUMN mood_score REAL")
 except:
     pass
 
