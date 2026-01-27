@@ -1,0 +1,22 @@
+{
+  "name": "music-mood-prediction",
+  "version": "1.0.0",
+  "description": "Full-stack music recommendation application",
+  "structure": {
+    "backend": {
+      "type": "FastAPI",
+      "port": 8000,
+      "entry": "backend/main.py"
+    },
+    "frontend": {
+      "type": "Flet (Python UI)",
+      "entry": "frontend/main.py"
+    }
+  },
+  "scripts": {
+    "backend": "cd backend && python -m uvicorn backend.main:app --reload",
+    "frontend": "cd frontend && python main.py",
+    "install": "pip install -r requirements.txt",
+    "test": "pytest backend/src/test/"
+  }
+}
