@@ -1,12 +1,25 @@
-# Music Mood Prediction API v2.1.0
+# Music Mood Bot API v3.0.0
 
 ## Tổng quan
 
-Đây là phiên bản mở rộng đáng kể của Music Mood Prediction API với nhiều tính năng mới.
+API backend của Music Mood Bot - Hệ thống gợi ý nhạc thông minh dựa trên tâm trạng với AI đàm thoại.
 
-## 🆕 Tính năng mới trong v2.1.0
+## 🆕 Tính năng mới trong v3.0.0
 
-### 1. **Time-Based Recommendations** (Đề xuất theo thời gian)
+### 1. **AI Đàm Thoại** (Google Gemini)
+- Bot hỏi 3-4 câu để hiểu rõ tâm trạng
+- Phân tích ngữ cảnh cuộc hội thoại
+- Gợi ý nhạc thông minh sau khi hiểu người dùng
+
+### 2. **TF-IDF Search v2.0**
+- Nhận diện ý định query (tìm tên/ca sĩ/mood/genre/tương tự)
+- Fast-path cho exact match
+- LRU Cache cho 100 query gần nhất
+- Tự động sửa lỗi chính tả tiếng Việt
+- Vectorized cosine similarity (nhanh gấp 10-50x)
+- Trọng số: 60% TF-IDF + 30% Exact + 10% Fuzzy
+
+### 3. **Time-Based Recommendations** (Đề xuất theo thời gian)
 - Đề xuất nhạc dựa trên thời điểm trong ngày
 - Đề xuất theo hoạt động (tập thể dục, làm việc, thư giãn...)
 - Lên lịch nhạc cho cả ngày
@@ -233,16 +246,18 @@ curl -X POST http://127.0.0.1:8000/api/v2/users/interactions \
 ## 📈 Thống kê phiên bản
 
 - **Tổng số endpoints:** 50+
-- **Services mới:** 8
-- **Lines of code mới:** ~4000
-- **Version:** 2.1.0
+- **Services:** 10+
+- **TF-IDF Search:** v2.0 (~1200 dòng code)
+- **AI Chat:** Google Gemini API
+- **Version:** 3.0.0
 
 ---
 
-## 🔮 Tính năng tương lai
+## 🔮 Tính năng đã hoàn thành
 
-- [ ] Real-time WebSocket notifications
-- [ ] Machine learning mood prediction
-- [ ] Social features (share, follow)
-- [ ] Music file upload & analysis
-- [ ] Spotify/YouTube integration
+- [x] AI đàm thoại với Gemini
+- [x] TF-IDF Search v2.0
+- [x] Time-based recommendations
+- [x] User preference learning
+- [x] Playlist management
+- [x] Export/Import data
