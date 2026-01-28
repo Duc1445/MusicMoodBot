@@ -26,16 +26,40 @@ class EngineConfig:
     loudness_db_floor: Number = -60.0
     loudness_db_ceil: Number = 0.0
 
-    # arousal weights
-    w_energy: Number = 0.45
-    w_tempo: Number = 0.20
-    w_loudness: Number = 0.20
-    w_dance_arousal: Number = 0.10
+    # arousal weights (v4.0 - advanced features)
+    w_energy: Number = 0.32
+    w_tempo: Number = 0.14
+    w_loudness: Number = 0.14
+    w_dance_arousal: Number = 0.08
     w_acoustic_penalty: Number = 0.05
+    w_liveness: Number = 0.06
+    w_tension: Number = 0.08  # NEW v4.0: tension level
+    w_groove: Number = 0.06  # NEW v4.0: groove factor
+    w_energy_buildup: Number = 0.07  # NEW v4.0: energy buildup
 
-    # valence weights
-    w_valence_happiness: Number = 0.85
-    w_valence_dance: Number = 0.15
+    # valence weights (v4.0 - advanced features)
+    w_valence_happiness: Number = 0.58
+    w_valence_dance: Number = 0.10
+    w_valence_mode: Number = 0.07
+    w_valence_instrumental: Number = 0.04
+    w_valence_brightness: Number = 0.08  # NEW v4.0: melodic brightness
+    w_valence_nostalgia: Number = 0.06  # NEW v4.0: nostalgia factor
+    w_valence_satisfaction: Number = 0.07  # NEW v4.0: release satisfaction
+
+    # emotional depth weights (v3.1)
+    use_emotional_depth: bool = True
+    depth_confidence_boost: Number = 0.15
+
+    # mood stability weights (v3.1)
+    use_mood_stability: bool = True
+    stability_weight: Number = 0.10
+
+    # NEW v4.0: Advanced feature weights
+    use_advanced_features: bool = True
+    harmonic_complexity_weight: Number = 0.05
+    rhythmic_complexity_weight: Number = 0.05
+    atmospheric_weight: Number = 0.04
+    volatility_weight: Number = 0.06
 
     # prototype training
     proto_min_std: Number = 8.0
@@ -44,11 +68,12 @@ class EngineConfig:
     # weak-label angry proxy thresholds
     angry_loudness_hi: Number = 75.0
     angry_tempo_hi: Number = 70.0
+    angry_tension_hi: Number = 70.0  # NEW v4.0
 
     # genre adaptation (tokens, safe for "ballad+rock")
     use_genre_tokens: bool = True
-    genre_min_count: int = 25    # use token prototypes only when token has enough samples
-    genre_weight: Number = 0.5   # blend weight (0..1): global vs genre tokens
+    genre_min_count: int = 25
+    genre_weight: Number = 0.5
 
     # intensity thresholds learned by fit (percentiles of arousal)
     intensity_p_low: Number = 33.0
@@ -105,6 +130,10 @@ class MoodEngine:
         )
 
     def valence_score(self, song: Song) -> Number:
+        """
+        Tính valence score (độ tích cực/vui vẻ) từ các thuộc tính.
+        v4.0: Thêm melodic_brightness, nostalgia, release_satisfaction.
+        """
         # Support both 'happiness' (TuneBat) and 'valence' (Spotify) fields
         happiness = _to_float(song.get("happiness"))
         valence = _to_float(song.get("valence"))
@@ -118,15 +147,61 @@ class MoodEngine:
             happiness_val = 50.0
             
         dance = coerce_0_100(_to_float(song.get("danceability")), default=50.0)
-        v = self.cfg.w_valence_happiness * happiness_val + self.cfg.w_valence_dance * dance
+        
+        # Mode (major=1 adds happiness, minor=0 neutral/sad)
+        mode = _to_float(song.get("mode"))
+        mode_bonus = 0.0
+        if mode is not None:
+            mode_bonus = 50.0 if mode == 1 else -20.0
+        
+        # Instrumentalness (pure instrumental tends to be more neutral)
+        instrumental = coerce_0_100(_to_float(song.get("instrumentalness")), default=0.0)
+        instrumental_pull = (50.0 - happiness_val) * (instrumental / 100.0)
+        
+        # NEW v4.0: Melodic brightness (higher pitch = brighter = happier)
+        brightness = coerce_0_100(_to_float(song.get("melodic_brightness")), default=50.0)
+        brightness_contrib = (brightness - 50.0)  # -50 to +50
+        
+        # NEW v4.0: Nostalgia factor (can be bittersweet, slight negative)
+        nostalgia = coerce_0_100(_to_float(song.get("nostalgia_factor")), default=40.0)
+        nostalgia_contrib = (50.0 - nostalgia) * 0.3  # High nostalgia = slightly less happy
+        
+        # NEW v4.0: Release satisfaction (cathartic = happier)
+        satisfaction = coerce_0_100(_to_float(song.get("release_satisfaction")), default=50.0)
+        satisfaction_contrib = (satisfaction - 50.0)  # -50 to +50
+        
+        v = (
+            self.cfg.w_valence_happiness * happiness_val 
+            + self.cfg.w_valence_dance * dance
+            + self.cfg.w_valence_mode * mode_bonus
+            + self.cfg.w_valence_instrumental * instrumental_pull
+            + self.cfg.w_valence_brightness * brightness_contrib
+            + self.cfg.w_valence_nostalgia * nostalgia_contrib
+            + self.cfg.w_valence_satisfaction * satisfaction_contrib
+        )
         return clamp(v, 0.0, 100.0)
 
     def arousal_score(self, song: Song) -> Number:
+        """
+        Tính arousal score (mức năng lượng/kích thích) từ các thuộc tính.
+        v4.0: Thêm tension, groove, energy_buildup.
+        """
         energy = coerce_0_100(_to_float(song.get("energy")), default=50.0)
         tempo = self.tempo_score(_to_float(song.get("tempo")))
         loud = self.loudness_score(_to_float(song.get("loudness")))
         dance = coerce_0_100(_to_float(song.get("danceability")), default=50.0)
         acoustic = coerce_0_100(_to_float(song.get("acousticness")), default=50.0)
+        liveness = coerce_0_100(_to_float(song.get("liveness")), default=10.0)
+        
+        # NEW v4.0: Tension level (dissonance = higher arousal)
+        tension = coerce_0_100(_to_float(song.get("tension_level")), default=50.0)
+        
+        # NEW v4.0: Groove factor (good groove = moderate arousal boost)
+        groove = coerce_0_100(_to_float(song.get("groove_factor")), default=50.0)
+        groove_contrib = (groove - 50.0) * 0.5  # Less impact than energy
+        
+        # NEW v4.0: Energy buildup (crescendo = higher perceived arousal)
+        buildup = coerce_0_100(_to_float(song.get("energy_buildup")), default=50.0)
 
         a = (
             self.cfg.w_energy * energy
@@ -134,11 +209,19 @@ class MoodEngine:
             + self.cfg.w_loudness * loud
             + self.cfg.w_dance_arousal * dance
             - self.cfg.w_acoustic_penalty * acoustic
+            + self.cfg.w_liveness * liveness
+            + self.cfg.w_tension * tension
+            + self.cfg.w_groove * groove_contrib
+            + self.cfg.w_energy_buildup * buildup
         )
         return clamp(a, 0.0, 100.0)
 
     # --- bootstrap weak labels (no human labels needed)
     def _weak_label(self, song: Song, v: Number, a: Number) -> str:
+        """
+        Gán nhãn yếu dựa trên valence/arousal.
+        v4.0: Sử dụng tension_level và harmonic_complexity để phân biệt stress/angry.
+        """
         v_hi = v >= self.valence_mid
         a_hi = a >= self.arousal_mid
 
@@ -152,8 +235,21 @@ class MoodEngine:
         # (-V, +A): stress vs angry proxy
         loud = self.loudness_score(_to_float(song.get("loudness")))
         tempo = self.tempo_score(_to_float(song.get("tempo")))
-        if loud >= self.cfg.angry_loudness_hi and tempo >= self.cfg.angry_tempo_hi:
+        
+        # NEW v4.0: Use tension_level for better stress/angry distinction
+        tension = coerce_0_100(_to_float(song.get("tension_level")), default=50.0)
+        harmonic_comp = coerce_0_100(_to_float(song.get("harmonic_complexity")), default=50.0)
+        
+        # Angry: high tension + loud + fast + complex harmony
+        if (tension >= self.cfg.angry_tension_hi and 
+            loud >= self.cfg.angry_loudness_hi and 
+            tempo >= self.cfg.angry_tempo_hi):
             return "angry"
+        
+        # Also angry if extremely high tension with moderate loudness
+        if tension >= 80 and loud >= 60:
+            return "angry"
+            
         return "stress"
 
     def _default_proto(self, mood: str) -> Prototype2D:
@@ -288,6 +384,10 @@ class MoodEngine:
         return {m: blended[m] / s for m in MOODS}
 
     def predict(self, song: Song) -> Dict[str, object]:
+        """
+        Dự đoán mood cho một bài hát.
+        v3.1: Sử dụng emotional_depth và mood_stability để tăng độ chính xác.
+        """
         v = self.valence_score(song)
         a = self.arousal_score(song)
 
@@ -295,8 +395,54 @@ class MoodEngine:
         mood = max(probs, key=probs.get)
         conf = float(probs[mood])
 
+        # Boost confidence nếu emotional_depth cao
+        emotional_depth = _to_float(song.get("emotional_depth"))
+        if self.cfg.use_emotional_depth and emotional_depth is not None:
+            depth_factor = (emotional_depth - 50) / 100.0
+            conf = clamp(conf + depth_factor * self.cfg.depth_confidence_boost, 0.0, 1.0)
+
+        # Adjust prediction based on mood_stability
+        mood_stability = _to_float(song.get("mood_stability"))
+        if self.cfg.use_mood_stability and mood_stability is not None:
+            if mood_stability > 75 and mood in ("stress", "angry"):
+                alt_probs = {m: p for m, p in probs.items() if m not in ("stress", "angry")}
+                if alt_probs:
+                    alt_mood = max(alt_probs, key=alt_probs.get)
+                    if probs[alt_mood] > conf * 0.7:
+                        mood = alt_mood
+                        conf = float(probs[mood])
+
+        # NEW v4.0: Use advanced features for fine-tuning
+        if self.cfg.use_advanced_features:
+            # Harmonic complexity affects confidence for complex moods
+            harmonic_comp = _to_float(song.get("harmonic_complexity"))
+            if harmonic_comp is not None and harmonic_comp > 60:
+                # Complex harmony = slightly boost confidence for stress/sad
+                if mood in ("stress", "sad"):
+                    conf = clamp(conf + 0.03, 0.0, 1.0)
+            
+            # Emotional volatility affects prediction
+            volatility = _to_float(song.get("emotional_volatility"))
+            if volatility is not None and volatility > 70:
+                # High volatility = less stable mood, reduce confidence slightly
+                conf = clamp(conf - 0.02, 0.0, 1.0)
+            
+            # Atmospheric depth for sad/stress distinction
+            atmospheric = _to_float(song.get("atmospheric_depth"))
+            if atmospheric is not None and atmospheric > 70 and mood == "stress":
+                # High atmosphere often means contemplative rather than stressed
+                if probs.get("sad", 0) > conf * 0.6:
+                    mood = "sad"
+                    conf = float(probs[mood])
+
         intensity_int = self.infer_intensity_int(a)
         mood_score = (v + a) / 2.0
+
+        # Gather all advanced metrics for output
+        tension_level = _to_float(song.get("tension_level"))
+        groove_factor = _to_float(song.get("groove_factor"))
+        harmonic_comp = _to_float(song.get("harmonic_complexity"))
+        rhythmic_comp = _to_float(song.get("rhythmic_complexity"))
 
         return {
             "valence_score": v,
@@ -305,5 +451,11 @@ class MoodEngine:
             "mood_confidence": conf,
             "intensity": intensity_int,
             "mood_score": mood_score,
+            "emotional_depth": emotional_depth,
+            "mood_stability": mood_stability,
+            "tension_level": tension_level,
+            "groove_factor": groove_factor,
+            "harmonic_complexity": harmonic_comp,
+            "rhythmic_complexity": rhythmic_comp,
         }
 
