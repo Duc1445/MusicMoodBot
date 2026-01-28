@@ -8,7 +8,7 @@ import random
 import requests
 from typing import Dict, List, Optional, Tuple
 
-from backend.database import (
+from backend.src.database.database import (
     add_chat_history, add_recommendation, get_all_songs
 )
 from src.config.constants import (

@@ -82,12 +82,4 @@ def root():
     }
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "backend.main:app",
-        host="127.0.0.1",
-        port=8000,
-        reload=False,
-        log_level="info"
-    )
+# Server is started via uvicorn when running the application

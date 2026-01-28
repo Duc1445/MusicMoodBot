@@ -1,9 +1,14 @@
 ﻿import flet as ft
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from backend.database import init_db, seed_sample_songs
+# Setup paths for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+workspace_dir = os.path.dirname(current_dir)  # Parent directory (MMB_FRONTBACK)
+sys.path.insert(0, current_dir)
+sys.path.insert(0, workspace_dir)
+
+from backend.src.database.database import init_db, seed_sample_songs
 from src.screens.login_screen import create_login_screen
 from src.screens.signup_screen import create_signup_screen
 from src.screens.chat_screen import create_chat_screen

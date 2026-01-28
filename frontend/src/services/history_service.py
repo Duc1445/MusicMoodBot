@@ -3,7 +3,7 @@ History service for MusicMoodBot
 Handles loading and displaying user chat history
 """
 
-from backend.database import get_user_recommendations
+from backend.src.database.database import get_user_recommendations
 from src.utils.state_manager import app_state
 
 

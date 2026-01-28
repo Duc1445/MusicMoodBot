@@ -10,7 +10,7 @@ import secrets
 from datetime import datetime
 from typing import Tuple, Optional
 
-from backend.database import add_user, get_user
+from backend.src.database.database import add_user, get_user
 from src.utils.state_manager import app_state
 
 
@@ -144,7 +144,7 @@ class AuthService:
         """Migrate plain text password to hashed format"""
         try:
             import sqlite3
-            from backend.database import DB_PATH
+            from backend.src.database.database import DB_PATH
             
             hashed, salt = hash_password(plain_password)
             stored_format = f"{hashed}:{salt}"
@@ -243,7 +243,7 @@ class AuthService:
         # Hash and update new password
         try:
             import sqlite3
-            from backend.database import DB_PATH
+            from backend.src.database.database import DB_PATH
             
             hashed, salt = hash_password(new_password)
             stored_format = f"{hashed}:{salt}"

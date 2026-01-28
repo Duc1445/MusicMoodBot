@@ -1,97 +1,173 @@
-# Music Mood Prediction Application - Merged Project
+# 🎵 Music Mood Prediction
 
-A full-stack music recommendation application combining FastAPI backend with Flet frontend.
+**Full-stack music recommendation system with ML-powered mood prediction.**
 
-## Project Structure
+Combines FastAPI backend + Flet UI + SQLite database for intelligent music recommendations based on mood.
 
-```
-merged/
-├── backend/           # FastAPI backend service
-│   ├── src/
-│   │   ├── api/      # API endpoints
-│   │   ├── database/ # Database operations
-│   │   ├── services/ # Business logic
-│   │   ├── ranking/  # Ranking algorithms
-│   │   ├── pipelines/# ML pipelines
-│   │   └── test/     # Backend tests
-│   ├── main.py       # FastAPI entry point
-│   └── requirements.txt
-│
-├── frontend/         # Flet UI application
-│   ├── src/
-│   │   ├── screens/  # UI screens
-│   │   ├── components/ # Reusable components
-│   │   ├── services/ # Frontend services
-│   │   └── config/   # Frontend config
-│   ├── main.py       # Flet entry point
-│   └── requirements.txt
-│
-├── requirements.txt  # Unified dependencies
-└── README.md         # This file
-```
+---
 
-## Setup & Installation
+## ⚡ Quick Start
 
-### 1. Install Dependencies
 ```bash
-cd merged
+# 1. Install dependencies
 pip install -r requirements.txt
+
+# 2. Start backend (Terminal 1)
+python backend/run_server.py
+# API: http://localhost:8000/api/docs
+
+# 3. Start frontend (Terminal 2)
+python frontend/main.py
 ```
 
-### 2. Setup Environment
-Copy `.env.example` to `.env` and configure:
-```bash
-cd backend
-cp .env.example .env
-```
+---
 
-### 3. Initialize Database
-```bash
-cd backend
-python -m backend.database
-```
+## 🏗️ Project Structure
 
-### 4. Run Backend Server
-```bash
-cd backend
-python -m uvicorn backend.main:app --reload
-```
+| Component | Tech | Entry Point |
+|-----------|------|-------------|
+| **Backend** | FastAPI | `backend/run_server.py` |
+| **Frontend** | Flet | `frontend/main.py` |
+| **Database** | SQLite | `backend/src/database/music.db` |
+| **ML Engine** | Python | Valence-Arousal model |
 
-### 5. Run Frontend Application
-```bash
-cd frontend
-python main.py
-```
+See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed architecture.
 
-## Development
+---
+
+## 🎯 Features
+
+✅ **Music Analysis**
+- 🎵 Mood prediction (happy, sad, stressed, energetic, thoughtful)
+- 🔍 Smart search with Vietnamese support
+- 📊 Song similarity matching
+
+✅ **Recommendations**
+- 📈 Personalized recommendations based on mood
+- ⏰ Time-based suggestions
+- 🎭 Smart mood transition planning
+
+✅ **User Management**
+- 👤 User accounts (login/signup)
+- 📝 Listening history
+- ❤️ Preferences learning
+- 📋 Playlist management
+
+✅ **Data**
+- 💾 30+ pre-loaded songs
+- 📊 ML attributes (valence, arousal, energy, etc.)
+- 🔐 Secure authentication
+
+---
+
+## 🛠️ Commands
 
 ### Backend
-- **Framework**: FastAPI
-- **Location**: `backend/`
-- **API Docs**: http://localhost:8000/api/docs
-
-### Frontend
-- **Framework**: Flet (Python)
-- **Location**: `frontend/`
-- **Entry Point**: `frontend/main.py`
-
-## Features
-
-- 🎵 Music mood prediction using ML
-- 🔍 Smart search and filtering
-- 📊 Personalized recommendations
-- 💾 User history tracking
-- 🎨 Modern UI with Flet
-
-## Testing
-
-Run tests with:
 ```bash
+# Start server
+python backend/run_server.py
+
+# Test backend
 pytest backend/src/test/
 ```
 
-## Documentation
+### Frontend
+```bash
+# Start UI
+python frontend/main.py
+```
 
-See individual README files in:
-- `backend/README.md`
-- `frontend/README.md`
+### Tools & Scripts
+```bash
+# Run demo
+python demos/demo_with_ui.py
+
+# Calculate mood attributes
+python tools/calculate_music_attributes.py
+```
+
+---
+
+## 📁 Key Files
+
+```
+backend/
+├── main.py              ← FastAPI app
+├── run_server.py        ← Server launcher
+├── .env                 ← Config
+└── src/
+    ├── api/             ← API endpoints
+    ├── database/        ← DB + music.db
+    ├── pipelines/       ← ML models
+    ├── services/        ← Business logic
+    └── repo/            ← Data access
+
+frontend/
+├── main.py              ← UI entry point
+└── src/
+    ├── screens/         ← Pages
+    ├── components/      ← UI widgets
+    ├── services/        ← Backend calls
+    └── config/          ← Themes
+```
+
+---
+
+## 📦 Database
+
+**Primary**: `backend/src/database/music.db` (76KB)
+- 30 songs with mood attributes
+- 2 user accounts
+- 11 tables (songs, users, history, etc.)
+
+**Backup**: `music_final_backup_20260128_082940.db`
+
+---
+
+## 🔧 Environment
+
+Create/edit `backend/.env`:
+```env
+DATABASE_PATH=music.db
+API_HOST=0.0.0.0
+API_PORT=8000
+API_DEBUG=false
+MOOD_ENGINE_AUTO_FIT=true
+SEARCH_TOP_K=10
+```
+
+---
+
+## 📚 Documentation
+
+- [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) - Detailed architecture
+- [backend/README.md](backend/README.md) - Backend guide
+- [frontend/README.md](frontend/README.md) - Frontend guide
+- [docs_src/README.md](docs_src/README.md) - Additional docs
+
+---
+
+## 🚀 Status
+
+✅ **Production Ready**
+- Database consolidated & optimized
+- ML models working
+- API endpoints tested
+- UI responsive
+- Backup created
+
+---
+
+## 📊 Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Flet (Python) |
+| Backend | FastAPI |
+| Database | SQLite3 |
+| ML | Scikit-learn, NumPy |
+| NLP | Vietnamese text processing |
+
+---
+
+**Last Updated**: 2026-01-28 | **Version**: 2.1.0
