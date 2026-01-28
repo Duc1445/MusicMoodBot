@@ -1,5 +1,5 @@
 """
-Mood Engine v5.1 - Forensic-level refactored
+Mood Engine v5.2 - Production-ready affective inference engine
 Based on MIR (Music Information Retrieval) best practices.
 
 v5.0 Fixes:
@@ -21,6 +21,12 @@ v5.1 Tweaks:
 14. Harmonic bias (mode+key) clamped to ±10
 15. Angry detection: tension+rhythmic weighted 1.5x (slow doom metal fix)
 16. Genre token weight scaled by prototype entropy
+
+v5.2 Production:
+17. Context-aware acousticness (orchestral/classical penalty reduced)
+18. Kinetic zero-floor (dance_safe >= 0.25 to avoid zero arousal)
+19. NarrativeAdapter for human-readable explanations
+20. Explanation tags for chatbot integration
 """
 
 from __future__ import annotations
@@ -102,6 +108,15 @@ MOOD_DESCRIPTIONS = {
     "angry": "mạnh mẽ, dữ dội",
 }
 
+# v5.2: Genres where acousticness should have reduced penalty
+# These genres are naturally acoustic but can be high-energy
+ORCHESTRAL_GENRES = {
+    "classical", "soundtrack", "orchestral", "opera", "symphony",
+    "film score", "cinematic", "epic", "trailer", "game soundtrack",
+    "neo-classical", "chamber", "baroque", "romantic", "contemporary classical",
+    "flamenco", "acoustic rock", "unplugged", "live"
+}
+
 
 def get_arousal_label(arousal: float) -> Tuple[str, str]:
     """Get human-readable arousal label (vi, en)."""
@@ -152,6 +167,10 @@ class EngineConfig:
 
     # Acoustic loudness scaling (NOT subtract from arousal)
     acoustic_loudness_scale: Number = 0.3  # effective_loud = loud * (1 - 0.3*acoustic)
+    acoustic_orchestral_scale: Number = 0.1  # v5.2: Reduced penalty for orchestral genres
+
+    # v5.2: Kinetic zero-floor to prevent zero arousal
+    kinetic_dance_floor: Number = 0.25  # min(dance, 0.25) for kinetic calc
 
     # =========================================================================
     # VALENCE WEIGHTS v5.0
@@ -272,7 +291,7 @@ class Prototype2D:
 
 
 class MoodEngine:
-    """Mood prediction engine v5.0 with forensic-level fixes."""
+    """Mood prediction engine v5.2 with forensic-level fixes."""
 
     def __init__(self, cfg: Optional[EngineConfig] = None):
         self.cfg = cfg or EngineConfig()
@@ -290,8 +309,8 @@ class MoodEngine:
         self._cos_theta = math.cos(theta)
         self._sin_theta = math.sin(theta)
 
-        # prototypes
-        self.global_protos: Dict[str, Prototype2D] = {}
+        # prototypes - initialize with defaults for unfitted usage
+        self.global_protos: Dict[str, Prototype2D] = {m: self._default_proto(m) for m in MOODS}
         self.token_protos: Dict[str, Dict[str, Prototype2D]] = {}
         self.token_counts: Dict[str, int] = {}
 
@@ -354,6 +373,23 @@ class MoodEngine:
         v_rot = v_c * self._cos_theta - a_c * self._sin_theta
         a_rot = v_c * self._sin_theta + a_c * self._cos_theta
         return v_rot + 50, a_rot + 50
+
+    def _get_acoustic_penalty(self, genre: Optional[str]) -> Number:
+        """
+        v5.2: Context-aware acoustic penalty.
+        Orchestral/classical genres get reduced penalty because
+        they can be acoustic but still high-energy.
+        """
+        if genre is None:
+            return self.cfg.acoustic_loudness_scale
+        
+        # Tokenize and check for orchestral genres
+        genre_lower = genre.lower()
+        for orch_genre in ORCHESTRAL_GENRES:
+            if orch_genre in genre_lower:
+                return self.cfg.acoustic_orchestral_scale
+        
+        return self.cfg.acoustic_loudness_scale
 
     # =========================================================================
     # VALENCE SCORE v5.0
@@ -445,11 +481,9 @@ class MoodEngine:
         """
         Calculate arousal score with interaction terms.
         
-        v5.0 Fixes:
-        - Energy reduced (was double-counting tempo+loudness)
-        - Added kinetic = sqrt(tempo * danceability) interaction
-        - Acousticness scales loudness, not subtract from arousal
-        - Halftime/doubletime detection
+        v5.2 Fixes:
+        - Context-aware acoustic penalty (orchestral reduced)
+        - Kinetic zero-floor (dance_safe >= 0.25)
         """
         energy = coerce_0_100(_to_float(song.get("energy")), default=50.0)
         raw_tempo = _to_float(song.get("tempo")) or 120
@@ -461,16 +495,18 @@ class MoodEngine:
         adjusted_tempo = self._detect_halftime(raw_tempo, energy)
         tempo = self.tempo_score(adjusted_tempo)
 
-        # === LOUDNESS with ACOUSTIC SCALING ===
-        # Acousticness scales loudness, NOT subtract from arousal!
+        # === LOUDNESS with CONTEXT-AWARE ACOUSTIC SCALING ===
+        # v5.2: Orchestral/classical gets reduced penalty
         raw_loudness = self.loudness_score(_to_float(song.get("loudness")))
-        acoustic_factor = 1 - self.cfg.acoustic_loudness_scale * (acoustic / 100.0)
+        acoustic_penalty = self._get_acoustic_penalty(song.get("genre"))
+        acoustic_factor = 1 - acoustic_penalty * (acoustic / 100.0)
         effective_loudness = raw_loudness * acoustic_factor
 
         # === KINETIC INTERACTION TERM ===
-        # sqrt(tempo * danceability) captures "movement energy"
-        # v5.1: Scale down by /10 to avoid dominance at extreme BPM
-        kinetic = math.sqrt(tempo * dance) / 10.0
+        # v5.2: Zero-floor to prevent kinetic = 0 when dance is low
+        # High tempo + low dance should still have some kinetic energy
+        dance_safe = max(dance, self.cfg.kinetic_dance_floor * 100)  # At least 25
+        kinetic = math.sqrt(tempo * dance_safe) / 10.0
 
         # === TENSION ===
         tension = coerce_0_100(_to_float(song.get("tension_level")), default=50.0)
@@ -829,4 +865,249 @@ class MoodEngine:
             "relax_score": _to_float(song.get("relax_score")),
             "party_score": _to_float(song.get("party_score")),
         }
+
+    def predict_with_explanation(self, song: Song) -> Dict[str, object]:
+        """
+        Full mood prediction WITH human-readable explanation (v5.2).
+        Use this for chatbot responses where narrative is needed.
+        """
+        prediction = self.predict(song)
+        
+        # Generate explanation using NarrativeAdapter
+        explanation = NarrativeAdapter.generate_explanation(song, prediction)
+        context_rec = NarrativeAdapter.get_context_recommendation(prediction)
+        
+        prediction["explanation"] = {
+            "narrative": explanation["narrative"],
+            "factors": explanation["factors"],
+            "confidence_note": explanation["confidence_note"],
+            "short_description": explanation["short_description"],
+            "context_recommendation": context_rec,
+        }
+        
+        return prediction
+
+
+# =============================================================================
+# NARRATIVE ADAPTER v5.2
+# Generates human-readable explanations for chatbot integration
+# =============================================================================
+
+class NarrativeAdapter:
+    """
+    Converts MoodEngine predictions to human-readable narratives.
+    Separated from core engine to maintain clean architecture.
+    """
+
+    # Explanation templates for each contributing factor
+    FACTOR_TEMPLATES = {
+        "tempo_slow": "tempo chậm",
+        "tempo_fast": "tempo nhanh",
+        "tempo_moderate": "tempo vừa phải",
+        "energy_low": "năng lượng thấp",
+        "energy_high": "năng lượng cao",
+        "energy_moderate": "năng lượng vừa",
+        "mode_minor": "giọng thứ (minor)",
+        "mode_major": "giọng trưởng (major)",
+        "valence_low": "giai điệu u sầu",
+        "valence_high": "giai điệu tươi sáng",
+        "acoustic": "âm thanh acoustic ấm áp",
+        "loud": "âm thanh mạnh mẽ",
+        "soft": "âm thanh nhẹ nhàng",
+        "danceable": "nhịp điệu dễ nhảy",
+        "groove_high": "groove cuốn hút",
+        "tension_high": "căng thẳng cao",
+        "complex_rhythm": "nhịp điệu phức tạp",
+        "atmospheric": "không khí sâu lắng",
+        "emotional_depth": "chiều sâu cảm xúc",
+    }
+
+    # Mood narrative templates
+    MOOD_NARRATIVES = {
+        "energetic": [
+            "Bài hát này tràn đầy năng lượng với {factors}.",
+            "Một bản nhạc sôi động, đặc trưng bởi {factors}.",
+            "Cảm xúc phấn khích từ {factors}.",
+        ],
+        "happy": [
+            "Bài hát mang lại cảm giác vui vẻ với {factors}.",
+            "Giai điệu tích cực, được tạo nên từ {factors}.",
+            "Một bản nhạc tươi sáng nhờ {factors}.",
+        ],
+        "sad": [
+            "Bài hát này mang cảm xúc buồn với {factors}.",
+            "Giai điệu trầm lắng, đặc trưng bởi {factors}.",
+            "Cảm giác u sầu được tạo nên từ {factors}.",
+        ],
+        "stress": [
+            "Bài hát tạo cảm giác căng thẳng với {factors}.",
+            "Không khí lo lắng từ {factors}.",
+            "Cảm xúc bất an được thể hiện qua {factors}.",
+        ],
+        "angry": [
+            "Bài hát này mạnh mẽ và dữ dội với {factors}.",
+            "Năng lượng bùng nổ từ {factors}.",
+            "Cảm xúc mãnh liệt được thể hiện qua {factors}.",
+        ],
+    }
+
+    @staticmethod
+    def extract_factors(song: Song, prediction: Dict) -> List[str]:
+        """
+        Extract key contributing factors from song and prediction.
+        Returns list of human-readable factor descriptions.
+        """
+        factors = []
+        
+        # Tempo factor
+        tempo = _to_float(song.get("tempo")) or 120
+        if tempo < 80:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["tempo_slow"])
+        elif tempo > 130:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["tempo_fast"])
+        
+        # Energy factor
+        energy = _to_float(song.get("energy")) or 50
+        if energy < 35:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["energy_low"])
+        elif energy > 70:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["energy_high"])
+        
+        # Mode factor
+        mode = _to_float(song.get("mode"))
+        if mode == 0:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["mode_minor"])
+        elif mode == 1:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["mode_major"])
+        
+        # Valence factor
+        valence = prediction.get("valence_score", 50)
+        if valence < 35:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["valence_low"])
+        elif valence > 65:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["valence_high"])
+        
+        # Acoustic factor
+        acoustic = _to_float(song.get("acousticness")) or 0
+        if acoustic > 70:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["acoustic"])
+        
+        # Loudness factor
+        loudness = _to_float(song.get("loudness")) or -10
+        if loudness > -5:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["loud"])
+        elif loudness < -15:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["soft"])
+        
+        # Danceability factor
+        dance = _to_float(song.get("danceability")) or 50
+        if dance > 70:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["danceable"])
+        
+        # Groove factor
+        groove = _to_float(song.get("groove_factor"))
+        if groove is not None and groove > 65:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["groove_high"])
+        
+        # Tension factor
+        tension = _to_float(song.get("tension_level"))
+        if tension is not None and tension > 65:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["tension_high"])
+        
+        # Rhythmic complexity
+        rhythmic = _to_float(song.get("rhythmic_complexity"))
+        if rhythmic is not None and rhythmic > 65:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["complex_rhythm"])
+        
+        # Atmospheric depth
+        atmospheric = _to_float(song.get("atmospheric_depth"))
+        if atmospheric is not None and atmospheric > 65:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["atmospheric"])
+        
+        # Emotional depth
+        depth = _to_float(song.get("emotional_depth"))
+        if depth is not None and depth > 65:
+            factors.append(NarrativeAdapter.FACTOR_TEMPLATES["emotional_depth"])
+        
+        # Ensure at least 2 factors
+        if len(factors) < 2:
+            arousal = prediction.get("arousal_score", 50)
+            if arousal > 55:
+                factors.append(NarrativeAdapter.FACTOR_TEMPLATES["energy_moderate"])
+            else:
+                factors.append(NarrativeAdapter.FACTOR_TEMPLATES["tempo_moderate"])
+        
+        return factors[:4]  # Limit to 4 most relevant factors
+
+    @staticmethod
+    def generate_explanation(song: Song, prediction: Dict) -> Dict[str, object]:
+        """
+        Generate human-readable explanation for mood prediction.
+        
+        Returns:
+        - narrative: Full sentence explanation
+        - factors: List of contributing factors
+        - confidence_note: Note about prediction confidence
+        """
+        import random
+        
+        mood = prediction.get("mood", "happy")
+        conf = prediction.get("mood_confidence", 0.5)
+        
+        # Extract factors
+        factors = NarrativeAdapter.extract_factors(song, prediction)
+        factors_text = ", ".join(factors[:3])
+        if len(factors) > 3:
+            factors_text += f" và {factors[3]}"
+        
+        # Select narrative template
+        templates = NarrativeAdapter.MOOD_NARRATIVES.get(mood, NarrativeAdapter.MOOD_NARRATIVES["happy"])
+        template = random.choice(templates)
+        narrative = template.format(factors=factors_text)
+        
+        # Confidence note
+        if conf >= 0.8:
+            conf_note = "Dự đoán có độ tin cậy cao."
+        elif conf >= 0.5:
+            conf_note = "Dự đoán có độ tin cậy trung bình."
+        else:
+            conf_note = "Bài hát có cảm xúc phức tạp, khó phân loại rõ ràng."
+        
+        return {
+            "narrative": narrative,
+            "factors": factors,
+            "confidence_note": conf_note,
+            "short_description": f"{prediction.get('valence_label', 'trung tính')}, {prediction.get('arousal_label', 'vừa phải')}",
+        }
+
+    @staticmethod
+    def get_context_recommendation(prediction: Dict) -> str:
+        """
+        Get context-based recommendation (when to listen).
+        """
+        morning = prediction.get("morning_score") or 50
+        evening = prediction.get("evening_score") or 50
+        workout = prediction.get("workout_score") or 50
+        focus = prediction.get("focus_score") or 50
+        relax = prediction.get("relax_score") or 50
+        party = prediction.get("party_score") or 50
+        
+        scores = {
+            "buổi sáng": morning,
+            "buổi tối": evening,
+            "tập gym": workout,
+            "làm việc tập trung": focus,
+            "thư giãn": relax,
+            "tiệc tùng": party,
+        }
+        
+        best_context = max(scores, key=scores.get)
+        best_score = scores[best_context]
+        
+        if best_score >= 70:
+            return f"Phù hợp nhất để nghe khi {best_context}."
+        elif best_score >= 50:
+            return f"Có thể nghe khi {best_context}."
+        else:
+            return "Phù hợp cho nhiều hoàn cảnh khác nhau."
 
