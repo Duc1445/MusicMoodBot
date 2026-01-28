@@ -1,8 +1,8 @@
 """
-Mood Engine v5.0 - Forensic-level refactored
+Mood Engine v5.1 - Forensic-level refactored
 Based on MIR (Music Information Retrieval) best practices.
 
-Fixes applied:
+v5.0 Fixes:
 1. Valence ≠ Happiness semantic separation
 2. Mode handling: slope not offset (+8/-4 instead of +50/-20)
 3. Acousticness: scales loudness, not subtract arousal
@@ -15,6 +15,12 @@ Fixes applied:
 10. Entropy-based confidence penalty
 11. Mahalanobis-aware prototype distance with covariance
 12. VA space rotation for diagonal emotions (sad↔stress)
+
+v5.1 Tweaks:
+13. Kinetic term scaled down (/10) to avoid dominance
+14. Harmonic bias (mode+key) clamped to ±10
+15. Angry detection: tension+rhythmic weighted 1.5x (slow doom metal fix)
+16. Genre token weight scaled by prototype entropy
 """
 
 from __future__ import annotations
@@ -134,7 +140,7 @@ class EngineConfig:
     # - Acousticness now scales loudness, not subtract
     # =========================================================================
     w_energy: Number = 0.22          # Reduced from 0.32 (avoid double-count)
-    w_kinetic: Number = 0.12         # NEW: sqrt(tempo * dance) interaction
+    w_kinetic: Number = 0.18         # v5.1: increased (kinetic now /10 scaled)
     w_tempo: Number = 0.10           # Reduced, tempo already in energy
     w_loudness: Number = 0.16
     w_dance_arousal: Number = 0.08
@@ -398,6 +404,9 @@ class MoodEngine:
         key = _to_float(song.get("key"))
         key_bias = self._get_key_bias(key, mode)
 
+        # v5.1: Clamp combined harmonic bias to avoid resonance (G major + major mode)
+        harmonic_bias = clamp(mode_contrib + key_bias, -10, 10)
+
         # === MELODIC BRIGHTNESS ===
         brightness = coerce_0_100(_to_float(song.get("melodic_brightness")), default=50.0)
         brightness_contrib = (brightness - 50.0) * 0.5
@@ -411,12 +420,12 @@ class MoodEngine:
         satisfaction_contrib = (satisfaction - 50.0) * 0.4
 
         # === COMBINE ===
+        # v5.1: Use combined harmonic_bias instead of separate mode+key
         v = (
             self.cfg.w_valence_core * emotional_valence
             + self.cfg.w_positivity * affective_positivity
             + self.cfg.w_valence_dance * dance
-            + self.cfg.w_valence_mode * mode_contrib
-            + self.cfg.w_valence_key * key_bias
+            + (self.cfg.w_valence_mode + self.cfg.w_valence_key) * harmonic_bias
             + self.cfg.w_valence_brightness * brightness_contrib
             + self.cfg.w_valence_nostalgia * nostalgia_contrib
             + self.cfg.w_valence_satisfaction * satisfaction_contrib
@@ -460,7 +469,8 @@ class MoodEngine:
 
         # === KINETIC INTERACTION TERM ===
         # sqrt(tempo * danceability) captures "movement energy"
-        kinetic = math.sqrt(tempo * dance)
+        # v5.1: Scale down by /10 to avoid dominance at extreme BPM
+        kinetic = math.sqrt(tempo * dance) / 10.0
 
         # === TENSION ===
         tension = coerce_0_100(_to_float(song.get("tension_level")), default=50.0)
@@ -525,22 +535,23 @@ class MoodEngine:
         rhythmic = coerce_0_100(_to_float(song.get("rhythmic_complexity")), default=50.0)
         
         # Angry detection with rhythmic complexity (for metal slow but angry)
-        angry_score = 0
+        # v5.1: Tension+rhythmic weighted 1.5x (catches slow doom metal)
+        angry_score = 0.0
         if tension >= self.cfg.angry_tension_hi:
-            angry_score += 1
-        if loud >= self.cfg.angry_loudness_hi:
-            angry_score += 1
-        if tempo >= self.cfg.angry_tempo_hi:
-            angry_score += 1
+            angry_score += 1.5  # Tension is key indicator
         if rhythmic >= self.cfg.angry_rhythmic_hi:
-            angry_score += 1
+            angry_score += 1.5  # Rhythmic catches slow angry
+        if loud >= self.cfg.angry_loudness_hi:
+            angry_score += 1.0
+        if tempo >= self.cfg.angry_tempo_hi:
+            angry_score += 1.0
 
-        # Need 3+ indicators for angry
-        if angry_score >= 3:
+        # Need 3+ weighted points for angry
+        if angry_score >= 3.0:
             return "angry"
 
-        # Also angry if extremely high tension + rhythmic (slow metal)
-        if tension >= 75 and rhythmic >= 65:
+        # Also angry if extremely high tension + rhythmic (slow doom metal)
+        if tension >= 70 and rhythmic >= 60:
             return "angry"
 
         return "stress"
@@ -704,7 +715,15 @@ class MoodEngine:
         for m in MOODS:
             avg_token_probs[m] /= n
 
-        w = clamp(float(self.cfg.genre_weight), 0.0, 1.0)
+        # v5.1: Scale genre weight by token prototype entropy
+        # Tight prototypes (low entropy) should have less influence
+        token_entropy = self._entropy(avg_token_probs)
+        max_entropy = math.log(len(MOODS))
+        entropy_ratio = token_entropy / max_entropy if max_entropy > 0 else 1.0
+        # High entropy = more uncertain = reduce genre influence
+        adjusted_weight = self.cfg.genre_weight * (0.5 + 0.5 * entropy_ratio)
+        
+        w = clamp(float(adjusted_weight), 0.0, 1.0)
         blended = {m: (1.0 - w) * global_probs[m] + w * avg_token_probs[m] for m in MOODS}
         s = sum(blended.values()) or 1.0
         return {m: blended[m] / s for m in MOODS}
