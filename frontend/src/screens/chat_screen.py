@@ -58,6 +58,19 @@ def create_chat_screen(page, on_history_click, on_profile_click):
             refresh_messages()
             page.update()
 
+        # Calculate mood score (scale 0-10)
+        raw_score = song.get('mood_confidence', song.get('suy_score', 0))
+        if raw_score > 10:
+            mood_score = round(raw_score / 10, 1)  # Scale down if > 10
+        else:
+            mood_score = round(raw_score, 1) if raw_score else 7.5
+        
+        # Get reason or generate one
+        reason = song.get('reason', '')
+        if not reason:
+            mood = song.get('mood', 'phù hợp')
+            reason = f"Bài hát này phù hợp với tâm trạng {mood} của bạn"
+
         return ft.Container(
             width=520,
             bgcolor=BG_CARD,
@@ -67,11 +80,11 @@ def create_chat_screen(page, on_history_click, on_profile_click):
                 spacing=6,
                 controls=[
                     ft.Text("🎵 Recommendation", size=FONT_SIZE_MD, weight=FONT_WEIGHT_BOLD, color=PRIMARY_ACCENT),
-                    ft.Text(song["name"], size=FONT_SIZE_MD, weight=FONT_WEIGHT_BOLD, color=TEXT_PRIMARY),
-                    ft.Text(f"Artist: {song['artist']}", size=FONT_SIZE_SM, color=TEXT_PRIMARY),
-                    ft.Text(f"Genre: {song['genre']}", size=FONT_SIZE_SM, color=TEXT_PRIMARY),
-                    ft.Text(f"Suy Score: {song['suy_score']}/10", size=FONT_SIZE_SM, color=TEXT_PRIMARY),
-                    ft.Text(f"Reason: {song['reason']}", size=FONT_SIZE_SM, color=TEXT_SECONDARY),
+                    ft.Text(song.get("song_name", song.get("name", "Unknown")), size=FONT_SIZE_MD, weight=FONT_WEIGHT_BOLD, color=TEXT_PRIMARY),
+                    ft.Text(f"Artist: {song.get('artist_name', song.get('artist', 'Unknown'))}", size=FONT_SIZE_SM, color=TEXT_PRIMARY),
+                    ft.Text(f"Genre: {song.get('genre', 'Unknown')}", size=FONT_SIZE_SM, color=TEXT_PRIMARY),
+                    ft.Text(f"Mood Score: {mood_score}/10", size=FONT_SIZE_SM, color=TEXT_PRIMARY),
+                    ft.Text(f"Reason: {reason}", size=FONT_SIZE_SM, color=TEXT_SECONDARY),
                     ft.Container(height=6),
                     ft.Row([ft.Button("Try again", on_click=on_try_again)], alignment=ft.MainAxisAlignment.END),
                 ],
@@ -223,7 +236,7 @@ def create_chat_screen(page, on_history_click, on_profile_click):
         return handler
 
     def send_message(e):
-        """Handle message sending"""
+        """Handle message sending with conversational AI mood detection"""
         if app_state.chat_flow["busy"]:
             return
         text = (message_field.value or "").strip()
@@ -236,9 +249,110 @@ def create_chat_screen(page, on_history_click, on_profile_click):
 
         st = app_state.chat_flow["state"]
 
-        if st in ("await_mood", "await_intensity"):
+        if st == "await_mood":
+            # Initialize conversation tracking if not exists
+            if "conversation_history" not in app_state.chat_flow:
+                app_state.chat_flow["conversation_history"] = []
+                app_state.chat_flow["conversation_turn"] = 0
+            
+            # Add user message to conversation history
+            app_state.chat_flow["conversation_history"].append({
+                "role": "user",
+                "text": text
+            })
+            app_state.chat_flow["conversation_turn"] += 1
+            turn = app_state.chat_flow["conversation_turn"]
+            history = app_state.chat_flow["conversation_history"]
+            
+            try:
+                from backend.src.pipelines.text_mood_detector import (
+                    generate_conversation_response,
+                    analyze_conversation_mood,
+                    should_end_conversation
+                )
+                
+                # Check if should end conversation and recommend
+                if should_end_conversation(history, turn):
+                    def apply_final():
+                        # Analyze mood from entire conversation
+                        result = analyze_conversation_mood(history)
+                        
+                        app_state.chat_flow["mood"] = result.mood
+                        app_state.chat_flow["intensity"] = result.intensity or "Vừa"
+                        app_state.chat_flow["state"] = "chatting"
+                        
+                        # Clear conversation for next round
+                        app_state.chat_flow["conversation_history"] = []
+                        app_state.chat_flow["conversation_turn"] = 0
+                        
+                        reason_text = ""
+                        if result.keywords_matched:
+                            reason_text = f" ({', '.join(result.keywords_matched[:2])})"
+                        
+                        chat_service.add_message(
+                            "bot", "text", 
+                            f"Mình hiểu rồi!{reason_text} 🎵\n\nDựa trên cuộc trò chuyện, mình thấy mood của bạn là: **{result.mood}** ({result.intensity})\n\nĐể mình tìm bài hát phù hợp nhé!"
+                        )
+                        make_recommendation()
+                    
+                    start_bot_reply(apply_final, delay_sec=0.3)
+                    return
+                
+                # Continue conversation - generate AI response
+                def apply_conversation():
+                    response = generate_conversation_response(history, turn)
+                    
+                    # Add bot response to history
+                    app_state.chat_flow["conversation_history"].append({
+                        "role": "bot",
+                        "text": response
+                    })
+                    
+                    chat_service.add_message("bot", "text", response)
+                
+                start_bot_reply(apply_conversation, delay_sec=0.2)
+                return
+                
+            except Exception as ex:
+                print(f"Conversational AI error: {ex}")
+                import traceback
+                traceback.print_exc()
+            
+            # Fallback if AI fails
+            def apply_fallback():
+                chat_service.add_message(
+                    "bot", "text", 
+                    "Mình hiểu rồi! Bạn có thể chọn mood bằng nút bên dưới hoặc tiếp tục chia sẻ nhé 😊"
+                )
+            start_bot_reply(apply_fallback, delay_sec=0)
+            return
+        
+        if st == "await_intensity":
+            # Try to detect intensity from text
+            text_lower = text.lower()
+            intensity_map = {
+                "nhẹ": "Nhẹ", "nhe": "Nhẹ", "light": "Nhẹ", "low": "Nhẹ",
+                "vừa": "Vừa", "vua": "Vừa", "medium": "Vừa", "normal": "Vừa",
+                "mạnh": "Mạnh", "manh": "Mạnh", "strong": "Mạnh", "high": "Mạnh"
+            }
+            
+            detected_intensity = None
+            for keyword, intensity in intensity_map.items():
+                if keyword in text_lower:
+                    detected_intensity = intensity
+                    break
+            
+            if detected_intensity:
+                def apply():
+                    app_state.chat_flow["intensity"] = detected_intensity
+                    app_state.chat_flow["state"] = "chatting"
+                    chat_service.add_message("bot", "text", f"Ok, intensity: {detected_intensity}")
+                    make_recommendation()
+                start_bot_reply(apply, delay_sec=0)
+                return
+            
             def apply():
-                chat_service.add_message("bot", "text", "Mình chưa hiểu ý bạn. Hãy chọn 1 mood bằng nút bên dưới.")
+                chat_service.add_message("bot", "text", "Hãy chọn intensity: Nhẹ, Vừa, hoặc Mạnh")
             start_bot_reply(apply, delay_sec=0)
             return
 
@@ -335,7 +449,14 @@ def create_chat_screen(page, on_history_click, on_profile_click):
         chat_service.reset()
         message_field.disabled = False
         send_btn.disabled = False
-        chat_service.add_message("bot", "text", "Chào bạn. Hôm nay bạn cảm thấy thế nào?")
+        # Reset conversation tracking
+        app_state.chat_flow["conversation_history"] = []
+        app_state.chat_flow["conversation_turn"] = 0
+        # Friendly opening message
+        chat_service.add_message(
+            "bot", "text", 
+            "Xin chào, tớ là MMB, ngày hôm nay của bạn thế nào? 😊"
+        )
         refresh_messages()
 
     def on_reset_click(e):

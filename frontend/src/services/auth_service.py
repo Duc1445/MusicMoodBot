@@ -111,7 +111,8 @@ class AuthService:
         if not user:
             return False, "Email/username không tồn tại!"
         
-        stored_password = user.get("password", "")
+        # Database column is password_hash, not password
+        stored_password = user.get("password_hash", user.get("password", ""))
         
         # Check if password is hashed (contains salt separator)
         if ":" in stored_password:
@@ -152,7 +153,7 @@ class AuthService:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE users SET password = ? WHERE username = ? OR email = ?",
+                "UPDATE users SET password_hash = ? WHERE username = ? OR email = ?",
                 (stored_format, email, email)
             )
             conn.commit()

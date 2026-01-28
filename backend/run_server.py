@@ -5,7 +5,10 @@ Music Mood Prediction - Backend Demo Server
 import sys
 import os
 
-# Add backend to path
+# Add project root to path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+# Also add backend directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 if __name__ == "__main__":
@@ -32,7 +35,7 @@ if __name__ == "__main__":
             app,
             host="0.0.0.0",
             port=8000,
-            reload=True,
+            reload=False,
             log_level="info"
         )
     except ImportError as e:

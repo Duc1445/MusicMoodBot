@@ -107,6 +107,11 @@ class ChatService:
             song
         )
         
+        # Save recommendation to database
+        song_id = song.get("song_id")
+        if song_id and app_state.user_info.get("user_id"):
+            ChatService.save_recommendation(song_id)
+        
         return {
             "success": True,
             "song": song,

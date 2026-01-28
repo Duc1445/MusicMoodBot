@@ -69,6 +69,8 @@ class AppState:
         self.chat_flow["mood"] = None
         self.chat_flow["intensity"] = None
         self.chat_flow["last_recommendation"] = None
+        self.chat_flow["conversation_history"] = []
+        self.chat_flow["conversation_turn"] = 0
         self.typing_on["value"] = False
         self.chat_flow["busy"] = False
     

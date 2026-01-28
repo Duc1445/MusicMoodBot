@@ -20,11 +20,13 @@ class HistoryService:
             # Use get_user_recommendations instead of get_user_chat_history
             history = get_user_recommendations(app_state.user_info["user_id"])
             
-            # Map field names: name -> song_name, artist -> song_artist
+            # Map field names for UI compatibility
             for item in history:
-                if "name" in item:
+                # song_name is now correctly returned from JOIN
+                if "song_name" not in item and "name" in item:
                     item["song_name"] = item["name"]
-                if "artist" in item:
+                # artist field (not artist_name)
+                if "song_artist" not in item and "artist" in item:
                     item["song_artist"] = item["artist"]
             
             return history if history else []
