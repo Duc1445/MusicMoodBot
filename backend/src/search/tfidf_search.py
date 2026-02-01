@@ -27,6 +27,9 @@ import time
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+from scipy.sparse import csr_matrix
+import warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 # Try to import rapidfuzz for faster fuzzy matching
 try:
@@ -574,8 +577,21 @@ class TFIDFSearchEngine:
             max_features=1000,   # More features for better precision
             lowercase=True,
             sublinear_tf=True,   # Use log(1 + tf) for better scaling
+            norm='l2',  # L2 normalization (default)
+            use_idf=True,
+            smooth_idf=True,
+            dtype=np.float32,  # Use float32 to save memory
         )
-        self.tfidf_matrix = self.vectorizer.fit_transform(documents)
+        try:
+            self.tfidf_matrix = self.vectorizer.fit_transform(documents)
+            # Convert to CSR format for efficient computation
+            if not isinstance(self.tfidf_matrix, csr_matrix):
+                self.tfidf_matrix = csr_matrix(self.tfidf_matrix)
+        except Exception as e:
+            print(f"Error fitting TF-IDF vectorizer: {e}")
+            # Fallback to simple implementation
+            self.vectorizer = None
+            self.tfidf_matrix = None
         
         return self
     
@@ -889,11 +905,17 @@ class TFIDFSearchEngine:
         # Preprocess query for Vietnamese support
         processed_query = preprocess_query(query)
         
-        # Vectorize query
-        query_vec = self.vectorizer.transform([processed_query])
-        
-        # Fast cosine similarity using sklearn (10-50x faster than loop)
-        tfidf_scores = cosine_similarity(query_vec, self.tfidf_matrix)[0]
+        try:
+            # Vectorize query
+            query_vec = self.vectorizer.transform([processed_query])
+            
+            # Fast cosine similarity using sklearn (10-50x faster than loop)
+            # Use dense_output=False for sparse matrix efficiency
+            tfidf_scores_dense = cosine_similarity(query_vec, self.tfidf_matrix)[0]
+        except Exception as e:
+            print(f"Error in vectorization/similarity: {e}")
+            # Return empty list if vectorization fails
+            return []
         
         # Pre-filter candidates using inverted index for short queries
         candidate_indices = None
@@ -917,9 +939,18 @@ class TFIDFSearchEngine:
         
         for i in indices_to_check:
             try:
-                tfidf_score = tfidf_scores[i]
-                if np.isnan(tfidf_score):
+                # Safely get TFIDF score with fallback
+                try:
+                    tfidf_score = float(tfidf_scores_dense[i])
+                except (TypeError, ValueError, IndexError):
                     tfidf_score = 0.0
+                
+                # Handle NaN values
+                if tfidf_score != tfidf_score or np.isnan(tfidf_score):  # NaN check
+                    tfidf_score = 0.0
+                
+                # Ensure score is in valid range
+                tfidf_score = max(0.0, min(1.0, tfidf_score))
                 
                 song = self.songs[i]
                 
@@ -933,13 +964,14 @@ class TFIDFSearchEngine:
                 
                 # Weighted score (more explicit weighting)
                 # TF-IDF: 60%, Exact boost: 30%, Fuzzy: 10%
-                score = min(1.0, 0.6 * tfidf_score + 0.3 * (boost / 0.6) + 0.1 * (fuzzy_score / 0.3))
+                score = min(1.0, 0.6 * float(tfidf_score) + 0.3 * (float(boost) / 0.6 if boost > 0 else 0) + 0.1 * (float(fuzzy_score) / 0.3 if fuzzy_score > 0 else 0))
                 
-            except Exception:
+            except Exception as e:
+                print(f"Warning: Error calculating score for song {i}: {e}")
                 score = 0.0
                 
             if score >= min_score:
-                similarities.append((i, score))
+                similarities.append((i, float(score)))
         
         # If using index but no results, fallback to full search
         if candidate_indices and not similarities:
@@ -1061,31 +1093,38 @@ class TFIDFSearchEngine:
         if ref_song is None or self.tfidf_matrix is None:
             return []
         
-        # Fast vectorized cosine similarity
-        ref_vec = self.tfidf_matrix[ref_idx]
-        all_scores = cosine_similarity(ref_vec, self.tfidf_matrix)[0]
-        
-        # Build results with mood/genre boost
-        similarities = []
-        for i, song in enumerate(self.songs):
-            if i == ref_idx:
-                continue  # Skip the reference song
+        try:
+            # Fast vectorized cosine similarity
+            ref_vec = self.tfidf_matrix[ref_idx]
+            all_scores = cosine_similarity(ref_vec, self.tfidf_matrix)[0]
             
-            score = all_scores[i]
-            if np.isnan(score):
-                score = 0.0
+            # Build results with mood/genre boost
+            similarities = []
+            for i, song in enumerate(self.songs):
+                if i == ref_idx:
+                    continue  # Skip the reference song
+                
+                try:
+                    score = float(all_scores[i])
+                    if score != score or np.isnan(score):  # NaN check
+                        score = 0.0
+                except (TypeError, ValueError):
+                    score = 0.0
+                
+                # Boost if same mood/genre
+                if song.get('mood') == ref_song.get('mood'):
+                    score = min(1.0, score + 0.1)
+                if song.get('genre') == ref_song.get('genre'):
+                    score = min(1.0, score + 0.1)
+                
+                similarities.append((song, score))
             
-            # Boost if same mood/genre
-            if song.get('mood') == ref_song.get('mood'):
-                score = min(1.0, score + 0.1)
-            if song.get('genre') == ref_song.get('genre'):
-                score = min(1.0, score + 0.1)
-            
-            similarities.append((song, score))
-        
-        # Sort and return top_k
-        similarities.sort(key=lambda x: x[1], reverse=True)
-        return similarities[:top_k]
+            # Sort and return top_k
+            similarities.sort(key=lambda x: x[1], reverse=True)
+            return similarities[:top_k]
+        except Exception as e:
+            print(f"Error in search_similar: {e}")
+            return []
     
     def search_by_mood(self, mood: str, intensity: Optional[int] = None, top_k: int = 10) -> List[Dict]:
         """

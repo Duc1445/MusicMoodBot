@@ -4,9 +4,9 @@ uvicorn[standard]==0.24.0
 pydantic==2.5.0
 
 # Machine Learning
-scikit-learn==1.3.2
-numpy==1.24.3
-scipy==1.11.4
+scikit-learn==1.4.2
+numpy==1.26.4
+scipy==1.13.0
 
 # Database
 sqlalchemy>=2.0.0
@@ -14,3 +14,6 @@ sqlalchemy>=2.0.0
 # Utilities
 python-dotenv>=1.0.0
 python-multipart>=0.0.6
+
+# Search optimization
+rapidfuzz>=3.0.0
