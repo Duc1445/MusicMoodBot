@@ -1,6 +1,9 @@
 """
-State management for MusicMoodBot
-Handles global application state with persistence support
+MusicMoodBot State Manager
+==========================
+Centralized application state with proper imports.
+
+IMPORTANT: This file uses RELATIVE imports only.
 """
 
 import json
@@ -8,16 +11,21 @@ import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from src.config.constants import CHAT_STATE_AWAIT_MOOD
-
-# State file path for persistence
-STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "user_state.json")
+# Use relative imports - THIS IS CRITICAL
+from ..config.settings import settings, logger, CHAT_STATE_AWAIT_MOOD
 
 
 class AppState:
-    """Centralized application state with persistence"""
+    """
+    Centralized application state with persistence.
+    
+    This is a SINGLETON - only ONE instance exists globally.
+    All screens/services share the same state.
+    """
     
     def __init__(self):
+        logger.debug("AppState initializing...")
+        
         # Dark mode state
         self.dark_mode: bool = False
         
@@ -36,7 +44,7 @@ class AppState:
         
         # Chat flow control
         self.chat_flow: Dict[str, Any] = {
-            "state": CHAT_STATE_AWAIT_MOOD,  # await_mood | await_intensity | chatting
+            "state": CHAT_STATE_AWAIT_MOOD,
             "mood": None,
             "intensity": None,
             "busy": False,
@@ -64,21 +72,48 @@ class AppState:
             "liked_songs": [],
             "mood_history": []
         }
+        
+        logger.debug("AppState initialized successfully")
+    
+    # ==================== CHAT METHODS ====================
     
     def reset_chat(self):
-        """Reset chat state"""
+        """Reset chat state to initial values"""
+        logger.debug("Resetting chat state")
         self.chat_messages.clear()
         self.chat_flow["state"] = CHAT_STATE_AWAIT_MOOD
         self.chat_flow["mood"] = None
         self.chat_flow["intensity"] = None
         self.chat_flow["last_recommendation"] = None
-        self.chat_flow["conversation_history"] = []
-        self.chat_flow["conversation_turn"] = 0
         self.typing_on["value"] = False
         self.chat_flow["busy"] = False
     
+    def add_message(self, sender: str, kind: str, text: str = None, song: dict = None):
+        """Add a message to chat history"""
+        msg = {
+            "sender": sender,
+            "kind": kind,
+            "text": text,
+            "song": song
+        }
+        self.chat_messages.append(msg)
+        logger.debug(f"Message added: {sender}/{kind} - {len(self.chat_messages)} total")
+    
+    def set_typing(self, is_typing: bool):
+        """Set typing indicator state"""
+        self.typing_on["value"] = is_typing
+        logger.debug(f"Typing indicator: {is_typing}")
+    
+    def set_busy(self, is_busy: bool):
+        """Set busy state (prevents multiple requests)"""
+        self.chat_flow["busy"] = is_busy
+        logger.debug(f"Busy state: {is_busy}")
+    
+    # ==================== USER METHODS ====================
+    
     def reset_user(self):
         """Clear user information"""
+        logger.debug("Resetting user state")
         self.user_info = {
             "name": "",
             "email": "",
@@ -95,15 +130,29 @@ class AppState:
             "mood_history": []
         }
     
+    def set_user(self, user_id: int, name: str, email: str):
+        """Set user information after login"""
+        self.user_info["user_id"] = user_id
+        self.user_info["name"] = name
+        self.user_info["email"] = email
+        self.user_info["last_login"] = datetime.now().isoformat()
+        logger.info(f"User logged in: {name} (ID: {user_id})")
+    
+    def is_logged_in(self) -> bool:
+        """Check if user is logged in"""
+        return self.user_info.get("user_id") is not None
+    
+    # ==================== BOOTSTRAP METHODS ====================
+    
     def set_chat_bootstrap(self, fn):
-        """Set bootstrap callback"""
+        """Set bootstrap callback for chat screen"""
         self._chat_bootstrap = fn
     
     def get_chat_bootstrap(self):
         """Get bootstrap callback"""
         return self._chat_bootstrap
     
-    # ==================== NEW FEATURES ====================
+    # ==================== PREFERENCE LEARNING ====================
     
     def record_mood_selection(self, mood: str):
         """Record mood selection for learning"""
@@ -126,6 +175,7 @@ class AppState:
             key=lambda m: mood_counts[m],
             reverse=True
         )[:3]
+        logger.debug(f"Recorded mood: {mood}")
     
     def record_song_feedback(self, song_id: int, liked: bool):
         """Record user feedback on song"""
@@ -139,12 +189,15 @@ class AppState:
                 self.learned_preferences["disliked_songs"].append(song_id)
             if song_id in self.learned_preferences["liked_songs"]:
                 self.learned_preferences["liked_songs"].remove(song_id)
+        logger.debug(f"Song {song_id} feedback: {'liked' if liked else 'disliked'}")
     
     def get_suggested_mood(self) -> Optional[str]:
         """Get suggested mood based on history"""
         if self.learned_preferences["favorite_moods"]:
             return self.learned_preferences["favorite_moods"][0]
         return None
+    
+    # ==================== SESSION TRACKING ====================
     
     def increment_recommendation_count(self):
         """Increment recommendation counter"""
@@ -153,6 +206,8 @@ class AppState:
     def increment_search_count(self):
         """Increment search counter"""
         self.session["searches_count"] += 1
+    
+    # ==================== PERSISTENCE ====================
     
     def save_state(self) -> bool:
         """Save state to file for persistence"""
@@ -165,18 +220,19 @@ class AppState:
                 "learned_preferences": self.learned_preferences,
                 "session": self.session
             }
-            with open(STATE_FILE, 'w', encoding='utf-8') as f:
+            with open(settings.STATE_FILE, 'w', encoding='utf-8') as f:
                 json.dump(state_data, f, ensure_ascii=False, indent=2)
+            logger.debug("State saved successfully")
             return True
         except Exception as e:
-            print(f"Failed to save state: {e}")
+            logger.error(f"Failed to save state: {e}")
             return False
     
     def load_state(self) -> bool:
         """Load state from file"""
         try:
-            if os.path.exists(STATE_FILE):
-                with open(STATE_FILE, 'r', encoding='utf-8') as f:
+            if os.path.exists(settings.STATE_FILE):
+                with open(settings.STATE_FILE, 'r', encoding='utf-8') as f:
                     state_data = json.load(f)
                 
                 # Restore user info (except password)
@@ -189,9 +245,10 @@ class AppState:
                 if "learned_preferences" in state_data:
                     self.learned_preferences.update(state_data["learned_preferences"])
                 
+                logger.debug("State loaded successfully")
                 return True
         except Exception as e:
-            print(f"Failed to load state: {e}")
+            logger.error(f"Failed to load state: {e}")
         return False
     
     def get_session_summary(self) -> Dict:
@@ -204,10 +261,17 @@ class AppState:
             "liked_songs_count": len(self.learned_preferences["liked_songs"]),
             "user_name": self.user_info.get("name", "Guest")
         }
+    
+    def __repr__(self):
+        return f"<AppState user={self.user_info.get('name', 'Guest')} msgs={len(self.chat_messages)}>"
 
 
-# Global state instance
+# ==================== GLOBAL STATE INSTANCE ====================
+# This is the ONLY instance - all imports share this same object
+
 app_state = AppState()
 
-# Try to load previous state
+# Try to load previous state on import
 app_state.load_state()
+
+logger.info("AppState singleton ready")

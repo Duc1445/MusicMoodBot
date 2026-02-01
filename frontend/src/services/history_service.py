@@ -4,7 +4,7 @@ Handles loading and displaying user chat history
 """
 
 from backend.src.database.database import get_user_recommendations
-from src.utils.state_manager import app_state
+from ..utils.state_manager import app_state
 
 
 class HistoryService:

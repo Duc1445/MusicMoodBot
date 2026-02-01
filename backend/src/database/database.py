@@ -113,7 +113,7 @@ def get_user_recommendations(user_id: int, limit: int = 20) -> List[Dict]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT r.*, s.name as song_name, s.artist, s.genre, s.moods as mood
+        SELECT r.*, s.song_name, s.artist, s.genre, s.mood
         FROM recommendations r 
         LEFT JOIN songs s ON r.song_id = s.song_id 
         WHERE r.user_id = ? 
