@@ -11,6 +11,9 @@ scipy==1.13.0
 # Database
 sqlalchemy>=2.0.0
 
+# Authentication
+PyJWT>=2.8.0
+
 # Utilities
 python-dotenv>=1.0.0
 python-multipart>=0.0.6

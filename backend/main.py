@@ -1,9 +1,11 @@
 """FastAPI application entry point."""
 
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from backend.src.api.mood_api import router as mood_router
 from backend.src.api.extended_api import router as extended_router
+from backend.src.api.auth_api import router as auth_router
 import logging
 
 # Setup logging
@@ -36,9 +38,15 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+# Get allowed origins from environment variable or use defaults
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000").split(",")
+# For development, allow all origins
+if os.getenv("ALLOW_ALL_ORIGINS", "true").lower() == "true":
+    CORS_ORIGINS = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,6 +55,7 @@ app.add_middleware(
 # Include routers
 app.include_router(mood_router, prefix="/api/moods", tags=["moods"])
 app.include_router(extended_router, prefix="/api/v2", tags=["extended", "playlists", "analytics"])
+app.include_router(auth_router, prefix="/api/v2", tags=["authentication"])
 
 
 @app.get("/health")
