@@ -4,8 +4,8 @@ History screen for MusicMoodBot - Figma Design 1:1
 
 import flet as ft
 from datetime import datetime
-from src.config.theme_professional import *
-from src.services.history_service import history_service
+from ..config.theme_professional import *
+from ..services.history_service import history_service
 
 
 # Figma color scheme

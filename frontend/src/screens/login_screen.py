@@ -3,9 +3,9 @@ Login screen for MusicMoodBot - Figma Design 1:1
 """
 
 import flet as ft
-from src.config.theme_professional import *
-from src.services.auth_service import auth_service
-from src.utils.state_manager import app_state
+from ..config.theme_professional import *
+from ..services.auth_service import auth_service
+from ..utils.state_manager import app_state
 
 
 def create_login_screen(on_signup_click, on_login_submit):

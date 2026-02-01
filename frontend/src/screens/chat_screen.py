@@ -6,10 +6,10 @@ import flet as ft
 import threading
 import time
 from datetime import datetime
-from src.config.theme_professional import *
-from src.services.chat_service import chat_service
-from src.utils.state_manager import app_state
-from src.utils.helpers import _make_progress, _ui_safe
+from ..config.theme_professional import *
+from ..services.chat_service import chat_service
+from ..utils.state_manager import app_state
+from ..utils.helpers import _make_progress, _ui_safe
 
 
 # Figma color scheme
