@@ -1,0 +1,21 @@
+{
+  "user_info": {
+    "name": "hung",
+    "email": "hung382005@gmail.com",
+    "user_id": 1,
+    "preferences": {},
+    "last_login": "2026-02-01T08:15:50.893509"
+  },
+  "learned_preferences": {
+    "favorite_moods": [],
+    "favorite_genres": [],
+    "disliked_songs": [],
+    "liked_songs": [],
+    "mood_history": []
+  },
+  "session": {
+    "start_time": "2026-02-01T08:15:34.473680",
+    "recommendations_count": 0,
+    "searches_count": 0
+  }
+}
