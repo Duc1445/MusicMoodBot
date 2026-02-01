@@ -11,17 +11,14 @@ from src.utils.state_manager import app_state
 def create_login_screen(on_signup_click, on_login_submit):
     """Create login screen matching Figma design exactly"""
     error_text = ft.Text("", size=12, color="#FF4444")
-    
-    # Dark mode state
-    is_dark_mode = {"value": getattr(app_state, 'dark_mode', False)}
 
     # Input fields
     email_field = ft.TextField(
         hint_text="user123",
         border=ft.InputBorder.NONE,
         bgcolor="transparent",
-        hint_style=ft.TextStyle(color="#999999" if not is_dark_mode["value"] else "#888888", size=14),
-        text_style=ft.TextStyle(color="#1A1A1A" if not is_dark_mode["value"] else "#FFFFFF", size=14),
+        hint_style=ft.TextStyle(color="#999999", size=14),
+        text_style=ft.TextStyle(color="#1A1A1A", size=14),
         expand=True,
     )
     password_field = ft.TextField(
@@ -29,8 +26,8 @@ def create_login_screen(on_signup_click, on_login_submit):
         password=True,
         border=ft.InputBorder.NONE,
         bgcolor="transparent",
-        hint_style=ft.TextStyle(color="#999999" if not is_dark_mode["value"] else "#888888", size=14),
-        text_style=ft.TextStyle(color="#1A1A1A" if not is_dark_mode["value"] else "#FFFFFF", size=14),
+        hint_style=ft.TextStyle(color="#999999", size=14),
+        text_style=ft.TextStyle(color="#1A1A1A", size=14),
         expand=True,
     )
 
@@ -222,76 +219,28 @@ def create_login_screen(on_signup_click, on_login_submit):
     music_playlist_icon = ft.Container(
         alignment=ft.Alignment(0.85, 0.75),
         content=ft.Column([
-            ft.Text("♪", size=50, color="#D0D0D0" if not is_dark_mode["value"] else "#555555"),
+            ft.Text("♪", size=50, color="#D0D0D0"),
             ft.Container(
                 width=40,
                 content=ft.Column([
-                    ft.Container(height=3, bgcolor="#D0D0D0" if not is_dark_mode["value"] else "#555555", border_radius=2),
-                    ft.Container(height=3, bgcolor="#D0D0D0" if not is_dark_mode["value"] else "#555555", border_radius=2),
-                    ft.Container(height=3, bgcolor="#D0D0D0" if not is_dark_mode["value"] else "#555555", border_radius=2),
+                    ft.Container(height=3, bgcolor="#D0D0D0", border_radius=2),
+                    ft.Container(height=3, bgcolor="#D0D0D0", border_radius=2),
+                    ft.Container(height=3, bgcolor="#D0D0D0", border_radius=2),
                 ], spacing=4),
             ),
         ], spacing=4, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
     )
     
-    # Dark mode toggle icon
-    dark_mode_icon_name = ft.Icons.DARK_MODE if not is_dark_mode["value"] else ft.Icons.LIGHT_MODE
-    
-    # Main background container (will be updated on toggle)
+    # Main background
     main_bg = ft.Container(
         expand=True,
-        bgcolor="#FAF9F6" if not is_dark_mode["value"] else "#1A1A1A",
-    )
-    
-    # Dark mode button reference
-    dark_mode_btn_ref = {"btn": None}
-    
-    def toggle_dark_mode(e):
-        is_dark_mode["value"] = not is_dark_mode["value"]
-        app_state.dark_mode = is_dark_mode["value"]
-        
-        # Update icon
-        if dark_mode_btn_ref["btn"]:
-            dark_mode_btn_ref["btn"].icon = ft.Icons.LIGHT_MODE if is_dark_mode["value"] else ft.Icons.DARK_MODE
-            dark_mode_btn_ref["btn"].icon_color = "#FFD700" if is_dark_mode["value"] else "#1A1A1A"
-            dark_mode_btn_ref["btn"].update()
-        
-        # Update main background
-        main_bg.bgcolor = "#1A1A1A" if is_dark_mode["value"] else "#FAF9F6"
-        
-        # Update window frame colors
-        window_frame.bgcolor = "#2D2D2D" if is_dark_mode["value"] else "#FFFFFF"
-        window_frame.border = ft.border.all(2, "#444444" if is_dark_mode["value"] else "#1A1A1A")
-        
-        # Update all controls
-        main_bg.update()
-        window_frame.update()
-    
-    # Create IconButton
-    dark_mode_icon_btn = ft.IconButton(
-        icon=dark_mode_icon_name,
-        icon_color="#1A1A1A",
-        icon_size=24,
-        style=ft.ButtonStyle(
-            bgcolor="#FFFFFF",
-            shape=ft.CircleBorder(),
-            side=ft.BorderSide(2, "#1A1A1A"),
-        ),
-        on_click=toggle_dark_mode,
-    )
-    dark_mode_btn_ref["btn"] = dark_mode_icon_btn
-    
-    # Dark mode toggle button (bottom-right corner)
-    dark_mode_btn = ft.Container(
-        alignment=ft.Alignment(0.95, 0.92),
-        content=dark_mode_icon_btn,
+        bgcolor="#FAF9F6",
     )
 
     # Build main background with stack
     main_bg.content = ft.Stack([
         headphones_icon,
         music_playlist_icon,
-        dark_mode_btn,
         # Center the window frame
         ft.Container(
             expand=True,
