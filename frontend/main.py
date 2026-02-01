@@ -16,12 +16,18 @@ from src.screens.history_screen import create_history_screen
 from src.screens.profile_screen import create_profile_screen
 from src.config.constants import APP_NAME
 from src.utils.state_manager import app_state
+from src.services.auth_service import auth_service
+from src.services.api_client import api
 
 def main(page: ft.Page):
     page.title = APP_NAME
     page.theme_mode = ft.ThemeMode.LIGHT
     page.window.width = 1000
     page.window.height = 700
+    
+    # Initialize Flet page for secure token storage
+    auth_service.set_flet_page(page)
+    api.set_flet_page(page)
     
     try:
         init_db()

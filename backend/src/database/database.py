@@ -18,7 +18,7 @@ def init_db():
         user_id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         total_songs_listened INTEGER DEFAULT 0,
         favorite_mood TEXT DEFAULT NULL,
@@ -65,11 +65,12 @@ def seed_sample_songs():
         print("Sample songs seeded successfully")
     conn.close()
 
-def add_user(username: str, email: str, password: str) -> Optional[int]:
+def add_user(username: str, email: str, password_hash: str) -> Optional[int]:
+    """Add new user with hashed password"""
     try:
         conn = _get_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)", (username, email, password))
+        cursor.execute("INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)", (username, email, password_hash))
         conn.commit()
         user_id = cursor.lastrowid
         conn.close()
@@ -77,11 +78,12 @@ def add_user(username: str, email: str, password: str) -> Optional[int]:
     except:
         return None
 
-def get_user(username: str) -> Optional[Dict]:
+def get_user(identifier: str) -> Optional[Dict]:
+    """Get user by username or email"""
     conn = _get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    cursor.execute("SELECT * FROM users WHERE username = ? OR email = ?", (identifier, identifier))
     user = cursor.fetchone()
     conn.close()
     return dict(user) if user else None
@@ -111,7 +113,7 @@ def get_user_recommendations(user_id: int, limit: int = 20) -> List[Dict]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT r.*, s.song_name, s.artist, s.genre, s.mood, s.mood_confidence
+        SELECT r.*, s.name as song_name, s.artist, s.genre, s.moods as mood
         FROM recommendations r 
         LEFT JOIN songs s ON r.song_id = s.song_id 
         WHERE r.user_id = ? 

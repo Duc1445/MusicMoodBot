@@ -5,22 +5,25 @@ Now with API integration for smart recommendations
 """
 
 import random
-import requests
 from typing import Dict, List, Optional, Tuple
 
-from backend.src.database.database import (
-    add_chat_history, add_recommendation, get_all_songs
-)
+# Use centralized API client instead of direct requests
+from .api_client import api, APIStatus
+
+# Import database functions only for fallback
+try:
+    from backend.src.database.database import (
+        add_chat_history, add_recommendation, get_all_songs
+    )
+    HAS_LOCAL_DB = True
+except ImportError:
+    HAS_LOCAL_DB = False
+
 from src.config.constants import (
     MOOD_EMOJI, INTENSITY_EMOJI, CHAT_STATE_AWAIT_MOOD, 
-    CHAT_STATE_AWAIT_INTENSITY, CHAT_STATE_CHATTING
+    CHAT_STATE_AWAIT_INTENSITY, CHAT_STATE_CHATTING, MOOD_VI_TO_EN
 )
 from src.utils.state_manager import app_state
-
-
-# API Configuration
-API_BASE_URL = "http://localhost:8000/api/moods"
-API_TIMEOUT = 10  # seconds
 
 
 class ChatService:
@@ -33,8 +36,8 @@ class ChatService:
     def _check_api_availability(self):
         """Check if backend API is available"""
         try:
-            response = requests.get(f"{API_BASE_URL}/health", timeout=2)
-            self.api_available = response.status_code == 200
+            response = api.moods.health_check()
+            self.api_available = response.is_success
         except:
             self.api_available = False
     
@@ -61,13 +64,16 @@ class ChatService:
         emoji = MOOD_EMOJI.get(mood, "🎵")
         ChatService.add_message("user", "text", f"{emoji} Mood: {mood}")
         
-        # Save to database
-        if app_state.user_info["user_id"]:
-            add_chat_history(
-                app_state.user_info["user_id"],
-                mood=mood,
-                intensity=None
-            )
+        # Save to database if available
+        if HAS_LOCAL_DB and app_state.user_info.get("user_id"):
+            try:
+                add_chat_history(
+                    app_state.user_info["user_id"],
+                    mood=mood,
+                    intensity=None
+                )
+            except Exception as e:
+                print(f"Save chat history error: {e}")
         
         # Update state
         app_state.chat_flow["mood"] = mood
@@ -87,13 +93,16 @@ class ChatService:
         emoji = INTENSITY_EMOJI.get(intensity, "✨")
         ChatService.add_message("user", "text", f"{emoji} Intensity: {intensity}")
         
-        # Save to database
-        if app_state.user_info["user_id"]:
-            add_chat_history(
-                app_state.user_info["user_id"],
-                mood=app_state.chat_flow["mood"],
-                intensity=intensity
-            )
+        # Save to database if available
+        if HAS_LOCAL_DB and app_state.user_info.get("user_id"):
+            try:
+                add_chat_history(
+                    app_state.user_info["user_id"],
+                    mood=app_state.chat_flow["mood"],
+                    intensity=intensity
+                )
+            except Exception as e:
+                print(f"Save chat history error: {e}")
         
         # Update state
         app_state.chat_flow["intensity"] = intensity
@@ -121,31 +130,32 @@ class ChatService:
     @staticmethod
     def pick_song(mood: str) -> dict:
         """Pick a song based on mood - with API fallback"""
-        # Try API first
+        # Convert Vietnamese mood to English for API
+        mood_en = MOOD_VI_TO_EN.get(mood, "happy")
+        
+        # Try API first using centralized client
         try:
-            response = requests.get(
-                f"{API_BASE_URL}/songs/by-mood/{ChatService._mood_to_en(mood)}",
-                timeout=API_TIMEOUT
-            )
-            if response.status_code == 200:
-                songs = response.json()
+            response = api.moods.get_songs_by_mood(mood_en)
+            if response.is_success and response.data:
+                songs = response.data
                 if songs:
                     song = random.choice(songs)
                     return ChatService._normalize_song(song)
-        except:
-            pass
+        except Exception as e:
+            print(f"API error: {e}")
         
         # Fallback to local database
-        try:
-            songs = get_all_songs()
-            if songs:
-                # Filter by mood if available
-                mood_songs = [s for s in songs if mood in s.get("moods", [])]
-                if mood_songs:
-                    return random.choice(mood_songs)
-                return random.choice(songs)
-        except:
-            pass
+        if HAS_LOCAL_DB:
+            try:
+                songs = get_all_songs()
+                if songs:
+                    # Filter by mood if available
+                    mood_songs = [s for s in songs if mood in str(s.get("moods", ""))]
+                    if mood_songs:
+                        return ChatService._normalize_song(random.choice(mood_songs))
+                    return ChatService._normalize_song(random.choice(songs))
+            except Exception as e:
+                print(f"Local DB error: {e}")
         
         return {
             "name": "No songs found",
@@ -158,14 +168,7 @@ class ChatService:
     @staticmethod
     def _mood_to_en(mood_vi: str) -> str:
         """Convert Vietnamese mood to English for API"""
-        mapping = {
-            "Vui": "happy",
-            "Buồn": "sad",
-            "Suy tư": "stress",
-            "Chill": "happy",
-            "Năng lượng": "energetic"
-        }
-        return mapping.get(mood_vi, "happy")
+        return MOOD_VI_TO_EN.get(mood_vi, "happy")
     
     @staticmethod
     def _normalize_song(song: dict) -> dict:
@@ -191,14 +194,14 @@ class ChatService:
         Returns:
             Tuple of (mood_info, song)
         """
+        user_id = app_state.user_info.get("user_id")
+        
         try:
-            response = requests.post(
-                f"{API_BASE_URL}/smart-recommend",
-                params={"text": text, "top_k": 5},
-                timeout=API_TIMEOUT
-            )
-            if response.status_code == 200:
-                data = response.json()
+            # Use centralized API client with proper JSON body
+            response = api.moods.smart_recommend(text, user_id=str(user_id) if user_id else None, limit=5)
+            
+            if response.is_success and response.data:
+                data = response.data
                 mood_info = data.get("detected_mood", {})
                 recommendations = data.get("recommendations", [])
                 
@@ -228,15 +231,12 @@ class ChatService:
             Dict with mood, confidence, intensity
         """
         try:
-            response = requests.post(
-                f"{API_BASE_URL}/detect-mood-from-text",
-                params={"text": text},
-                timeout=API_TIMEOUT
-            )
-            if response.status_code == 200:
-                return response.json()
-        except:
-            pass
+            # Use POST with JSON body (not params)
+            response = api.client.post("/api/moods/detect-mood-from-text", data={"text": text})
+            if response.is_success and response.data:
+                return response.data
+        except Exception as e:
+            print(f"Mood detection error: {e}")
         
         return {
             "detected_mood": "Chill",
@@ -277,16 +277,12 @@ class ChatService:
             List of matching songs
         """
         try:
-            response = requests.get(
-                f"{API_BASE_URL}/search",
-                params={"query": query, "top_k": top_k},
-                timeout=API_TIMEOUT
-            )
-            if response.status_code == 200:
-                songs = response.json()
+            response = api.moods.search_songs(query, limit=top_k)
+            if response.is_success and response.data:
+                songs = response.data
                 return [ChatService._normalize_song(s) for s in songs]
-        except:
-            pass
+        except Exception as e:
+            print(f"Search error: {e}")
         
         return []
     
@@ -304,20 +300,19 @@ class ChatService:
             List of recommended songs
         """
         try:
-            params = {"top_k": top_k, "diversity": True}
-            if mood:
-                params["mood"] = ChatService._mood_to_en(mood)
+            mood_en = MOOD_VI_TO_EN.get(mood) if mood else None
             
-            response = requests.get(
-                f"{API_BASE_URL}/user/{user_id}/personalized-recommend",
-                params=params,
-                timeout=API_TIMEOUT
-            )
-            if response.status_code == 200:
-                songs = response.json()
+            # Use client directly for custom endpoint
+            params = {"top_k": top_k, "diversity": True}
+            if mood_en:
+                params["mood"] = mood_en
+            
+            response = api.client.get(f"/api/moods/user/{user_id}/personalized-recommend", params=params)
+            if response.is_success and response.data:
+                songs = response.data if isinstance(response.data, list) else []
                 return [ChatService._normalize_song(s) for s in songs]
-        except:
-            pass
+        except Exception as e:
+            print(f"Recommendation error: {e}")
         
         return []
     
@@ -325,6 +320,9 @@ class ChatService:
     def save_recommendation(song_id: int = None):
         """Save recommendation to database"""
         if not app_state.user_info["user_id"]:
+            return False
+        
+        if not HAS_LOCAL_DB:
             return False
         
         try:
@@ -335,7 +333,8 @@ class ChatService:
                 intensity=app_state.chat_flow["intensity"]
             )
             return True
-        except:
+        except Exception as e:
+            print(f"Save recommendation error: {e}")
             return False
     
     @staticmethod
