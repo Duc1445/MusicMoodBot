@@ -40,7 +40,7 @@ class DecorationMascot:
             width=130,
             height=130,
             border_radius=20,
-            bgcolor=GLASS_MEDIUM,
+            bgcolor=GLASS_MEDIUM_FIGMA,
             border=ft.border.all(2, PRIMARY_ACCENT),
             padding=10,
             content=ft.Column(
@@ -124,7 +124,7 @@ def create_decoration_mascot(
         width=130,
         height=130,
         border_radius=20,
-        bgcolor=GLASS_MEDIUM,
+        bgcolor=GLASS_MEDIUM_FIGMA,
         border=ft.border.all(2, PRIMARY_ACCENT),
         padding=10,
         content=ft.Column(

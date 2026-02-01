@@ -8,35 +8,35 @@ Version: 2.0 - Premium Edition
 # Professional color palette with modern aesthetic
 
 # ========== BASE COLORS ==========
-# Primary Brand Colors
+# Primary Brand Colors - Updated for Figma design
 PRIMARY_ACCENT = "#00D9FF"          # Cyan - Modern tech color
 PRIMARY_ACCENT_LIGHT = "#33E5FF"    # Light Cyan
 PRIMARY_ACCENT_DARK = "#00A8CC"     # Dark Cyan
 
-# Background - Premium Dark Mode
-BG_DARKEST = "#0A0E17"   # Ultra dark - behind modals
-BG_DARK = "#0F1419"      # Primary background
-BG_SECONDARY = "#131A24" # Secondary areas
-BG_CARD = "#1A232F"      # Card/Container backgrounds
-BG_CARD_HOVER = "#232D3D" # Hover state
-BG_INPUT = "#141D2A"     # Input fields
-BG_OVERLAY = "#0F141988" # Semi-transparent overlay
+# Background - Light theme for Figma design
+BG_LIGHT = "#FFFFFF"        # White background
+BG_LIGHT_GRAY = "#F8F9FA"   # Light gray for cards
+BG_LIGHT_SECONDARY = "#F1F3F4" # Secondary light areas
+BG_LIGHT_CARD = "#FFFFFF"   # Card backgrounds (white)
+BG_LIGHT_CARD_HOVER = "#F8F9FA" # Hover state
+BG_LIGHT_INPUT = "#FFFFFF"  # Input fields (white)
+BG_LIGHT_OVERLAY = "#0000000D" # Semi-transparent overlay
 
-# Glassmorphism - Frosted glass effect
-GLASS_LIGHT = "#1A232F80"   # Light glass (semi-transparent)
-GLASS_MEDIUM = "#1A232F99"  # Medium glass
-GLASS_DARK = "#0F1419CC"    # Dark glass
+# Glassmorphism - Light theme glass effect
+GLASS_LIGHT_FIGMA = "#FFFFFFCC"   # Light glass (semi-transparent white)
+GLASS_MEDIUM_FIGMA = "#FFFFFFE6"  # Medium glass
+GLASS_DARK_FIGMA = "#FFFFFF99"    # Dark glass
 
-# Text & Typography
-TEXT_PRIMARY = "#FFFFFF"
-TEXT_SECONDARY = "#8FA3C0"
-TEXT_TERTIARY = "#617A94"
-TEXT_MUTED = "#475569"
-TEXT_DISABLED = "#364558"
+# Text & Typography - Dark text for light theme
+TEXT_PRIMARY_FIGMA = "#1A1A1A"    # Dark gray/black primary text
+TEXT_SECONDARY_FIGMA = "#5F6368"  # Secondary text
+TEXT_TERTIARY_FIGMA = "#80868B"   # Tertiary text
+TEXT_MUTED_FIGMA = "#9AA0A6"      # Muted text
+TEXT_DISABLED_FIGMA = "#BDC1C6"   # Disabled text
 
-# Divider & Borders
-BORDER_COLOR = "#1F2937"
-DIVIDER_COLOR = "#1F293799"
+# Divider & Borders - Light theme
+BORDER_COLOR_FIGMA = "#E0E0E0"    # Light gray borders
+DIVIDER_COLOR_FIGMA = "#E8EAED"   # Light dividers
 
 # ========== MOOD COLORS - PREMIUM PALETTE ==========
 # Carefully selected colors for mood representation
@@ -86,34 +86,34 @@ GRADIENT_BG_DARK = ["#0F1419", "#1A232F"]
 GRADIENT_BG_CARD = ["#1A232F", "#131A24"]
 
 # =============== SHADOWS ===============
-# Professional shadow system for depth
+# Professional shadow system for depth - Updated for Figma light theme
 
-# Subtle shadows for glass effect
-SHADOW_SUBTLE = {
-    "blur_radius": 4,
-    "color": "#00000030",
-    "offset": (0, 1),
+# Subtle shadows for glass effect - Figma spec
+SHADOW_SUBTLE_FIGMA = {
+    "blur_radius": 20,
+    "color": "#0000000D",  # rgba(0,0,0,0.05)
+    "offset": (0, 4),
 }
 
-# Small shadows for cards and buttons
-SHADOW_SMALL = {
-    "blur_radius": 8,
-    "color": "#00000040",
-    "offset": (0, 2),
+# Small shadows for cards and buttons - Figma spec
+SHADOW_SMALL_FIGMA = {
+    "blur_radius": 20,
+    "color": "#0000000D",  # rgba(0,0,0,0.05)
+    "offset": (0, 4),
 }
 
 # Medium shadows for elevated content
-SHADOW_MEDIUM = {
-    "blur_radius": 16,
-    "color": "#00000050",
+SHADOW_MEDIUM_FIGMA = {
+    "blur_radius": 20,
+    "color": "#0000000D",  # rgba(0,0,0,0.05)
     "offset": (0, 4),
 }
 
 # Large shadows for modals and overlays
-SHADOW_LARGE = {
-    "blur_radius": 32,
-    "color": "#00000060",
-    "offset": (0, 8),
+SHADOW_LARGE_FIGMA = {
+    "blur_radius": 20,
+    "color": "#0000000D",  # rgba(0,0,0,0.05)
+    "offset": (0, 4),
 }
 
 # Glow effect (for active/focus states)
@@ -136,36 +136,40 @@ SPACING_3XL = 40    # 3X Extra Large
 SPACING_4XL = 48    # 4X Extra Large
 
 # =============== BORDER RADIUS ===============
-# Modern rounded corners
+# Modern rounded corners - Updated for Figma
 
 RADIUS_NONE = 0
 RADIUS_SMALL = 4     # Subtle rounding
 RADIUS_MEDIUM = 8    # Standard button/input
-RADIUS_LARGE = 12    # Cards and containers
-RADIUS_XL = 16       # Large components
-RADIUS_FULL = 24     # Fully rounded
+RADIUS_LARGE = 12    # Cards and containers (Figma spec)
+RADIUS_XL = 25       # Large components (buttons - pill shape)
+RADIUS_FULL = 50     # Fully rounded
 
 # =============== TYPOGRAPHY ===============
 # Professional type scale
 
-# Font Sizes
+# Font Sizes - Updated for Figma specs
 FONT_SIZE_TINY = 10
-FONT_SIZE_SMALL = 12
+FONT_SIZE_SMALL = 12    # Small text/version (Figma: 12px)
 FONT_SIZE_SM = 13
-FONT_SIZE_BASE = 14
+FONT_SIZE_BASE = 14     # Body/Labels (Figma: 14px-16px)
 FONT_SIZE_MD = 15
-FONT_SIZE_LG = 16
+FONT_SIZE_LG = 16       # Body/Labels (Figma: 14px-16px)
 FONT_SIZE_XL = 18
-FONT_SIZE_2XL = 20
-FONT_SIZE_3XL = 24
-FONT_SIZE_TITLE = 28
+FONT_SIZE_2XL = 24      # Headline (Figma: 24px-28px)
+FONT_SIZE_3XL = 28      # Headline (Figma: 24px-28px)
+FONT_SIZE_TITLE = 28    # Headline (Figma: 24px-28px)
 
-# Font Weights
+# Font Families - Figma specs
+FONT_FAMILY_FIGMA_HEADLINE = "Quicksand, sans-serif"  # Headlines
+FONT_FAMILY_FIGMA_BODY = "Nunito, sans-serif"        # Body text
+
+# Font Weights - Updated for Figma
 FONT_WEIGHT_LIGHT = 300
 FONT_WEIGHT_NORMAL = 400
-FONT_WEIGHT_MEDIUM = 500
+FONT_WEIGHT_MEDIUM = 500    # Body text (Figma: Medium)
 FONT_WEIGHT_SEMIBOLD = 600
-FONT_WEIGHT_BOLD = 700
+FONT_WEIGHT_BOLD = 700      # Headlines (Figma: Bold)
 
 # Line Heights
 LINE_HEIGHT_TIGHT = 1.2

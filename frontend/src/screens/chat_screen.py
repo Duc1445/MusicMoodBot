@@ -1,183 +1,325 @@
 """
-Chat screen for MusicMoodBot - Professional UI
+Chat screen for MusicMoodBot - Figma Design 1:1
 """
 
 import flet as ft
 import threading
 import time
-import os
+from datetime import datetime
 from src.config.theme_professional import *
-from src.components.ui_components_pro import *
 from src.services.chat_service import chat_service
-from src.services.history_service import history_service
 from src.utils.state_manager import app_state
 from src.utils.helpers import _make_progress, _ui_safe
 
 
+# Figma color scheme
+TEAL_PRIMARY = "#4DB6AC"  # Teal/Cyan for chat
+TEAL_DARK = "#00897B"
+SIDEBAR_BG = "#FAFAFA"
+CHAT_BG = "#F5F5F5"
+
+
 def create_chat_screen(page, on_history_click, on_profile_click):
-    """Create chat screen UI"""
+    """Create chat screen matching Figma design exactly"""
     
     message_field = ft.TextField(
-        hint_text="Nhập tin nhắn…",
-        border=ft.InputBorder.UNDERLINE,
+        hint_text="Nhập tin nhắn...",
+        border=ft.InputBorder.NONE,
+        bgcolor="transparent",
+        hint_style=ft.TextStyle(color="#999999", size=14),
+        text_style=ft.TextStyle(color="#1A1A1A", size=14),
         expand=True,
-        text_style=ft.TextStyle(color="#FFFFFF", size=14),
-        hint_style=ft.TextStyle(color="#475569", size=14),
-        color="#FFFFFF",
-        cursor_color="#00D9FF",
-        focused_color="#00D9FF",
-        bgcolor=ft.Colors.TRANSPARENT,
     )
-    send_btn = ft.Button(
-        "Gửi",
-        width=80,
-        height=40,
-        style=ft.ButtonStyle(
-            color="#0F1419",
-            bgcolor={"": "#00D9FF"},
-        ),
-    )
-    messages_list = ft.Column(scroll=ft.ScrollMode.AUTO)
+    
+    messages_list = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=16)
 
     def set_busy(is_busy: bool):
         app_state.chat_flow["busy"] = is_busy
         message_field.disabled = is_busy
-        send_btn.disabled = is_busy
 
-    def bubble_for_text(sender: str, text: str):
-        """Create professional message bubble"""
-        return create_message_bubble_professional(sender, text)
+    def create_bot_message(text: str, time_str: str = None):
+        """Create bot message bubble (left side)"""
+        if not time_str:
+            time_str = datetime.now().strftime("%H:%M %p")
+        return ft.Row([
+            # Bot avatar
+            ft.Container(
+                width=36,
+                height=36,
+                border_radius=18,
+                bgcolor=TEAL_PRIMARY,
+                alignment=ft.Alignment(0,0),
+                content=ft.Text("🤖", size=18),
+            ),
+            ft.Container(width=8),
+            ft.Column([
+                ft.Row([
+                    ft.Text("MusicMoodBot", size=12, weight=ft.FontWeight.W_600, color="#1A1A1A"),
+                    ft.Text(f"  {time_str}", size=11, color="#888888"),
+                ], spacing=0),
+                ft.Container(height=4),
+                ft.Container(
+                    padding=ft.padding.all(14),
+                    border_radius=12,
+                    bgcolor="#FFFFFF",
+                    border=ft.border.all(1, "#E0E0E0"),
+                    content=ft.Text(text, size=14, color="#1A1A1A"),
+                ),
+            ], spacing=0),
+        ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.START)
 
-    def build_song_card(song: dict):
-        """Create song recommendation card"""
-        def on_try_again(e):
+    def create_user_message(text: str):
+        """Create user message bubble (right side)"""
+        return ft.Row([
+            ft.Container(expand=True),
+            ft.Column([
+                ft.Text("You", size=12, color="#888888", text_align=ft.TextAlign.RIGHT),
+                ft.Container(height=4),
+                ft.Container(
+                    padding=ft.padding.all(14),
+                    border_radius=12,
+                    bgcolor=TEAL_PRIMARY,
+                    content=ft.Text(text, size=14, color="#FFFFFF"),
+                ),
+            ], horizontal_alignment=ft.CrossAxisAlignment.END, spacing=0),
+            ft.Container(width=8),
+            # User avatar
+            ft.Container(
+                width=36,
+                height=36,
+                border_radius=18,
+                bgcolor="#E0E0E0",
+                alignment=ft.Alignment(0,0),
+                content=ft.Text("👤", size=18),
+            ),
+        ], alignment=ft.MainAxisAlignment.END, vertical_alignment=ft.CrossAxisAlignment.START)
+
+    def create_song_card(song: dict):
+        """Create song recommendation card (Figma style)"""
+        return ft.Container(
+            margin=ft.margin.only(left=44),
+            padding=ft.padding.all(16),
+            border_radius=12,
+            bgcolor="#FFFFFF",
+            border=ft.border.all(1, "#E0E0E0"),
+            content=ft.Row([
+                # Song icon
+                ft.Container(
+                    width=50,
+                    height=50,
+                    border_radius=8,
+                    bgcolor="#F0F0F0",
+                    alignment=ft.Alignment(0,0),
+                    content=ft.Text("♪", size=24, color=TEAL_PRIMARY),
+                ),
+                ft.Container(width=12),
+                # Song info
+                ft.Column([
+                    ft.Text(song.get("song_name", song.get("name", "Bài hát A")), 
+                           size=15, weight=ft.FontWeight.W_600, color="#1A1A1A"),
+                    ft.Text(f"Nghệ sĩ {song.get('artist', 'Unknown')}", 
+                           size=13, color="#666666"),
+                    ft.Row([
+                        ft.Text("🎵", size=12),
+                        ft.Text(f" Reason: {song.get('reason', 'Phù hợp mood của bạn')}", 
+                               size=12, color="#888888"),
+                    ], spacing=0),
+                ], spacing=4, expand=True),
+                # Play button
+                ft.Container(
+                    width=44,
+                    height=44,
+                    border_radius=22,
+                    bgcolor=TEAL_PRIMARY,
+                    alignment=ft.Alignment(0,0),
+                    content=ft.Text("▶", size=18, color="#FFFFFF"),
+                ),
+            ]),
+        )
+
+    def create_mood_chip(mood_name: str, emoji: str):
+        """Create mood selection chip (Figma style - outlined, compact)"""
+        def on_click(e):
             if app_state.chat_flow["busy"]:
                 return
-            # Apply recommendation immediately without typing indicator
-            make_recommendation(try_again=True)
-            refresh_messages()
-            page.update()
-
-        # Calculate mood score (scale 0-10)
-        raw_score = song.get('mood_confidence', song.get('suy_score', 0))
-        if raw_score > 10:
-            mood_score = round(raw_score / 10, 1)  # Scale down if > 10
-        else:
-            mood_score = round(raw_score, 1) if raw_score else 7.5
+            if app_state.chat_flow["state"] == "await_mood":
+                handle_mood_selection(mood_name)
         
-        # Get reason or generate one
-        reason = song.get('reason', '')
-        if not reason:
-            mood = song.get('mood', 'phù hợp')
-            reason = f"Bài hát này phù hợp với tâm trạng {mood} của bạn"
-
         return ft.Container(
-            width=520,
-            bgcolor=BG_CARD,
-            padding=16,
+            padding=ft.padding.symmetric(horizontal=10, vertical=5),
             border_radius=16,
-            content=ft.Column(
-                spacing=6,
-                controls=[
-                    ft.Text("🎵 Recommendation", size=FONT_SIZE_MD, weight=FONT_WEIGHT_BOLD, color=PRIMARY_ACCENT),
-                    ft.Text(song.get("song_name", song.get("name", "Unknown")), size=FONT_SIZE_MD, weight=FONT_WEIGHT_BOLD, color=TEXT_PRIMARY),
-                    ft.Text(f"Artist: {song.get('artist_name', song.get('artist', 'Unknown'))}", size=FONT_SIZE_SM, color=TEXT_PRIMARY),
-                    ft.Text(f"Genre: {song.get('genre', 'Unknown')}", size=FONT_SIZE_SM, color=TEXT_PRIMARY),
-                    ft.Text(f"Mood Score: {mood_score}/10", size=FONT_SIZE_SM, color=TEXT_PRIMARY),
-                    ft.Text(f"Reason: {reason}", size=FONT_SIZE_SM, color=TEXT_SECONDARY),
-                    ft.Container(height=6),
-                    ft.Row([ft.Button("Try again", on_click=on_try_again)], alignment=ft.MainAxisAlignment.END),
-                ],
-            ),
+            bgcolor="#FFFFFF",
+            border=ft.border.all(1, "#1A1A1A"),
+            on_click=on_click,
+            content=ft.Row([
+                ft.Text(emoji, size=12),
+                ft.Text(f" {mood_name}", size=11, weight=ft.FontWeight.W_500, color="#1A1A1A"),
+            ], spacing=0),
         )
+
+    def create_intensity_chip(intensity_name: str, emoji: str):
+        """Create intensity selection chip (compact)"""
+        def on_click(e):
+            if app_state.chat_flow["busy"]:
+                return
+            if app_state.chat_flow["state"] == "await_intensity":
+                handle_intensity_selection(intensity_name)
+        
+        return ft.Container(
+            padding=ft.padding.symmetric(horizontal=10, vertical=5),
+            border_radius=16,
+            bgcolor="#FFFFFF",
+            border=ft.border.all(1, TEAL_PRIMARY),
+            on_click=on_click,
+            content=ft.Row([
+                ft.Text(emoji, size=12),
+                ft.Text(f" {intensity_name}", size=11, weight=ft.FontWeight.W_500, color=TEAL_DARK),
+            ], spacing=0),
+        )
+
+    # Mood chips row (compact, single line)
+    mood_chips = ft.Row([
+        create_mood_chip("Vui", "😊"),
+        create_mood_chip("Buồn", "😢"),
+        create_mood_chip("Năng động", "⚡"),
+        create_mood_chip("Thư giãn", "🍃"),
+        create_mood_chip("Tập trung", "🎯"),
+    ], spacing=6)
+
+    # Intensity chips row (compact, single line)
+    intensity_chips = ft.Row([
+        create_intensity_chip("Nhẹ", "🌸"),
+        create_intensity_chip("Vừa", "🌿"),
+        create_intensity_chip("Mạnh", "🔥"),
+    ], spacing=6)
+
+    mood_section = ft.Container(
+        visible=(app_state.chat_flow["state"] == "await_mood"),
+        margin=ft.margin.only(left=44, top=4, bottom=4),
+        content=mood_chips,
+    )
+
+    intensity_section = ft.Container(
+        visible=(app_state.chat_flow["state"] == "await_intensity"),
+        margin=ft.margin.only(left=44, top=4, bottom=4),
+        content=intensity_chips,
+    )
 
     def refresh_messages():
         """Refresh message display"""
         messages_list.controls.clear()
+        
+        # Date separator
+        messages_list.controls.append(
+            ft.Row([
+                ft.Container(expand=True),
+                ft.Container(
+                    padding=ft.padding.symmetric(horizontal=16, vertical=6),
+                    border_radius=16,
+                    bgcolor="#E8E8E8",
+                    content=ft.Text("Today", size=12, color="#666666"),
+                ),
+                ft.Container(expand=True),
+            ])
+        )
 
         for msg in app_state.chat_messages:
             if msg["kind"] == "text":
-                item = bubble_for_text(msg["sender"], msg["text"])
-                messages_list.controls.append(item)
+                if msg["sender"] == "user":
+                    messages_list.controls.append(create_user_message(msg["text"]))
+                else:
+                    messages_list.controls.append(create_bot_message(msg["text"]))
             elif msg["kind"] == "card":
-                messages_list.controls.append(
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.START,
-                        controls=[build_song_card(msg["song"])],
-                    )
-                )
+                messages_list.controls.append(create_song_card(msg["song"]))
 
-        # Update visibility based on state
+        # Update visibility
         mood_section.visible = (app_state.chat_flow["state"] == "await_mood")
         intensity_section.visible = (app_state.chat_flow["state"] == "await_intensity")
 
         if app_state.typing_on["value"]:
             messages_list.controls.append(
-                ft.Row(
-                    alignment=ft.MainAxisAlignment.START,
-                    spacing=SPACING_SM,
-                    controls=[
-                        ft.Container(
-                            width=220,
-                            bgcolor=BG_INPUT,
-                            padding=12,
-                            border_radius=12,
-                            content=ft.Row(
-                                spacing=10,
-                                controls=[_make_progress(), ft.Text("Bot đang nhập...", size=FONT_SIZE_SM)],
-                            ),
-                        ),
-                    ],
-                )
+                ft.Row([
+                    ft.Container(
+                        width=36,
+                        height=36,
+                        border_radius=18,
+                        bgcolor=TEAL_PRIMARY,
+                        alignment=ft.Alignment(0,0),
+                        content=ft.Text("🤖", size=18),
+                    ),
+                    ft.Container(width=8),
+                    ft.Container(
+                        padding=ft.padding.all(12),
+                        border_radius=12,
+                        bgcolor="#FFFFFF",
+                        border=ft.border.all(1, "#E0E0E0"),
+                        content=ft.Row([
+                            _make_progress(),
+                            ft.Text(" Đang nhập...", size=13, color="#888888"),
+                        ]),
+                    ),
+                ])
             )
 
         page.update()
 
-
-
     def make_recommendation(try_again: bool = False):
-        """Generate and display recommendation"""
+        """Generate and display recommendation with Top 3 songs"""
         mood = app_state.chat_flow["mood"] or "Chill"
         intensity = app_state.chat_flow["intensity"] or "Vừa"
         
-        # If try_again, random a different intensity
         if try_again:
             import random
             all_intensities = ["Nhẹ", "Vừa", "Mạnh"]
-            # Keep trying until we get a different intensity
             new_intensity = random.choice(all_intensities)
             while new_intensity == intensity:
                 new_intensity = random.choice(all_intensities)
             intensity = new_intensity
-            app_state.chat_flow["intensity"] = intensity  # Update state with new intensity
+            app_state.chat_flow["intensity"] = intensity
         
-        song = chat_service.pick_song(mood)
+        # Get 3 different songs for Top 3
+        songs = []
+        used_names = set()
+        for _ in range(3):
+            song = chat_service.pick_song(mood)
+            # Avoid duplicate songs
+            song_name = song.get("name", "") if isinstance(song, dict) else ""
+            if song_name not in used_names:
+                songs.append(song)
+                used_names.add(song_name)
+        
+        # Fill remaining slots if we have duplicates
+        while len(songs) < 3:
+            song = chat_service.pick_song(mood)
+            song_name = song.get("name", "") if isinstance(song, dict) else ""
+            if song_name not in used_names:
+                songs.append(song)
+                used_names.add(song_name)
 
         text = (
-            f"Ok, mình thử bài khác (mood: {mood}, intensity: {intensity}) nhé."
-            if try_again
-            else f"Mình đã hiểu (mood: {mood}, intensity: {intensity}). Đây là gợi ý phù hợp:"
+            f"Dựa trên cảm xúc và thể loại bạn chọn, đây là Top 3 bài hát phù hợp nhất cho bạn hôm nay:"
+            if not try_again
+            else f"Đây là gợi ý khác cho bạn (mood: {mood}, intensity: {intensity}):"
         )
 
-        # Just add messages to state, don't call start_bot_reply again
         chat_service.add_message("bot", "text", text)
-        chat_service.add_message("bot", "card", song=song)
-        song_id = song.get("song_id") if isinstance(song, dict) else None
-        chat_service.save_recommendation(song_id=song_id)
         
-        # Reset state to allow continuous chat
+        # Add all 3 song cards
+        for song in songs:
+            chat_service.add_message("bot", "card", song=song)
+            song_id = song.get("song_id") if isinstance(song, dict) else None
+            chat_service.save_recommendation(song_id=song_id)
+        
         app_state.chat_flow["state"] = "await_mood"
         app_state.chat_flow["mood"] = None
-        # Keep intensity so try_again can random it properly
 
-    def start_bot_reply(apply_fn, delay_sec: float = 0.0):
+    def start_bot_reply(apply_fn, delay_sec: float = 0.3):
         """Start bot typing indicator and apply function"""
         set_busy(True)
         app_state.typing_on["value"] = True
         refresh_messages()
 
         def worker():
-            # Use minimal delay for responsiveness, but keep typing indicator visible briefly
             if delay_sec > 0:
                 time.sleep(delay_sec)
 
@@ -193,50 +335,28 @@ def create_chat_screen(page, on_history_click, on_profile_click):
 
     def handle_mood_selection(mood: str):
         """Handle mood chip click"""
-        chat_service.add_message("user", "text", f"{MOOD_CONFIG[mood]['emoji']} Mood: {mood}")
+        chat_service.add_message("user", "text", f"Mood: {mood}")
         app_state.chat_flow["mood"] = mood
-        app_state.chat_flow["state"] = "await_intensity"
-        
         refresh_messages()
-        page.update()
 
         def apply():
-            chat_service.add_message("bot", "text", "Ok. Bạn muốn intensity mức nào? (Nhẹ / Vừa / Mạnh)")
+            app_state.chat_flow["state"] = "await_intensity"
+            chat_service.add_message("bot", "text", "Bạn muốn mức độ nào? (Nhẹ / Vừa / Mạnh)")
 
-        start_bot_reply(apply, delay_sec=0)
+        start_bot_reply(apply, delay_sec=0.5)
 
-    def handle_emotion_click(emotion):
-        """Handle emotion button click - wrapper for mood selection"""
-        def handler(e):
-            if app_state.chat_flow["busy"]:
-                return
-            if app_state.chat_flow["state"] in ("await_mood",):
-                handle_mood_selection(emotion)
-            else:
-                chat_service.add_message("user", "text", f"{MOOD_CONFIG.get(emotion, {}).get('emoji', '🎵')} Cảm xúc: {emotion}")
-                refresh_messages()
-        return handler
-
-    def handle_intensity_click(intensity: str):
-        """Handle intensity button click"""
-        def handler(e):
-            if app_state.chat_flow["busy"]:
-                return
-            if app_state.chat_flow["state"] == "await_intensity":
-                chat_service.add_message("user", "text", f"{INTENSITY_CONFIG[intensity]['emoji']} Intensity: {intensity}")
-                app_state.chat_flow["intensity"] = intensity
-                app_state.chat_flow["state"] = "chatting"
-                refresh_messages()
-                page.update()
-                
-                # Apply recommendation immediately
-                make_recommendation()
-                refresh_messages()
-                page.update()
-        return handler
+    def handle_intensity_selection(intensity: str):
+        """Handle intensity chip click"""
+        chat_service.add_message("user", "text", f"Intensity: {intensity}")
+        app_state.chat_flow["intensity"] = intensity
+        app_state.chat_flow["state"] = "chatting"
+        refresh_messages()
+        
+        make_recommendation()
+        refresh_messages()
 
     def send_message(e):
-        """Handle message sending with conversational AI mood detection"""
+        """Handle message sending"""
         if app_state.chat_flow["busy"]:
             return
         text = (message_field.value or "").strip()
@@ -250,90 +370,18 @@ def create_chat_screen(page, on_history_click, on_profile_click):
         st = app_state.chat_flow["state"]
 
         if st == "await_mood":
-            # Initialize conversation tracking if not exists
-            if "conversation_history" not in app_state.chat_flow:
-                app_state.chat_flow["conversation_history"] = []
-                app_state.chat_flow["conversation_turn"] = 0
-            
-            # Add user message to conversation history
-            app_state.chat_flow["conversation_history"].append({
-                "role": "user",
-                "text": text
-            })
-            app_state.chat_flow["conversation_turn"] += 1
-            turn = app_state.chat_flow["conversation_turn"]
-            history = app_state.chat_flow["conversation_history"]
-            
-            try:
-                from backend.src.pipelines.text_mood_detector import (
-                    generate_conversation_response,
-                    analyze_conversation_mood,
-                    should_end_conversation
-                )
-                
-                # Check if should end conversation and recommend
-                if should_end_conversation(history, turn):
-                    def apply_final():
-                        # Analyze mood from entire conversation
-                        result = analyze_conversation_mood(history)
-                        
-                        app_state.chat_flow["mood"] = result.mood
-                        app_state.chat_flow["intensity"] = result.intensity or "Vừa"
-                        app_state.chat_flow["state"] = "chatting"
-                        
-                        # Clear conversation for next round
-                        app_state.chat_flow["conversation_history"] = []
-                        app_state.chat_flow["conversation_turn"] = 0
-                        
-                        reason_text = ""
-                        if result.keywords_matched:
-                            reason_text = f" ({', '.join(result.keywords_matched[:2])})"
-                        
-                        chat_service.add_message(
-                            "bot", "text", 
-                            f"Mình hiểu rồi!{reason_text} 🎵\n\nDựa trên cuộc trò chuyện, mình thấy mood của bạn là: **{result.mood}** ({result.intensity})\n\nĐể mình tìm bài hát phù hợp nhé!"
-                        )
-                        make_recommendation()
-                    
-                    start_bot_reply(apply_final, delay_sec=0.3)
-                    return
-                
-                # Continue conversation - generate AI response
-                def apply_conversation():
-                    response = generate_conversation_response(history, turn)
-                    
-                    # Add bot response to history
-                    app_state.chat_flow["conversation_history"].append({
-                        "role": "bot",
-                        "text": response
-                    })
-                    
-                    chat_service.add_message("bot", "text", response)
-                
-                start_bot_reply(apply_conversation, delay_sec=0.2)
-                return
-                
-            except Exception as ex:
-                print(f"Conversational AI error: {ex}")
-                import traceback
-                traceback.print_exc()
-            
-            # Fallback if AI fails
-            def apply_fallback():
-                chat_service.add_message(
-                    "bot", "text", 
-                    "Mình hiểu rồi! Bạn có thể chọn mood bằng nút bên dưới hoặc tiếp tục chia sẻ nhé 😊"
-                )
-            start_bot_reply(apply_fallback, delay_sec=0)
+            def apply():
+                chat_service.add_message("bot", "text", 
+                    "Mình hiểu rồi! Bạn có thể chọn mood bằng nút bên dưới hoặc tiếp tục chia sẻ 😊")
+            start_bot_reply(apply, delay_sec=0.3)
             return
         
         if st == "await_intensity":
-            # Try to detect intensity from text
             text_lower = text.lower()
             intensity_map = {
-                "nhẹ": "Nhẹ", "nhe": "Nhẹ", "light": "Nhẹ", "low": "Nhẹ",
-                "vừa": "Vừa", "vua": "Vừa", "medium": "Vừa", "normal": "Vừa",
-                "mạnh": "Mạnh", "manh": "Mạnh", "strong": "Mạnh", "high": "Mạnh"
+                "nhẹ": "Nhẹ", "nhe": "Nhẹ", "light": "Nhẹ",
+                "vừa": "Vừa", "vua": "Vừa", "medium": "Vừa",
+                "mạnh": "Mạnh", "manh": "Mạnh", "strong": "Mạnh"
             }
             
             detected_intensity = None
@@ -346,123 +394,27 @@ def create_chat_screen(page, on_history_click, on_profile_click):
                 def apply():
                     app_state.chat_flow["intensity"] = detected_intensity
                     app_state.chat_flow["state"] = "chatting"
-                    chat_service.add_message("bot", "text", f"Ok, intensity: {detected_intensity}")
                     make_recommendation()
-                start_bot_reply(apply, delay_sec=0)
+                start_bot_reply(apply, delay_sec=0.3)
                 return
             
             def apply():
                 chat_service.add_message("bot", "text", "Hãy chọn intensity: Nhẹ, Vừa, hoặc Mạnh")
-            start_bot_reply(apply, delay_sec=0)
+            start_bot_reply(apply, delay_sec=0.3)
             return
 
         def apply():
-            msg_text = f"Mình đã nhận: \"{text}\". Nếu muốn đổi gợi ý, bấm 'Try again'."
-            chat_service.add_message("bot", "text", msg_text)
-
-        start_bot_reply(apply, delay_sec=0)
-
-    send_btn.on_click = send_message
-    message_field.on_submit = send_message
-
-    # Create mood and intensity sections with references for visibility control
-    mood_section = ft.Column(
-        controls=[
-            create_glassmorphic_container(
-                ft.Column([
-                    ft.Text("Chọn cảm xúc:", size=11, weight=FONT_WEIGHT_SEMIBOLD, color=TEXT_PRIMARY),
-                    ft.Container(height=4),
-                    ft.Row(
-                        spacing=6,
-                        wrap=True,
-                        controls=[
-                            ft.Container(
-                                width=60,
-                                height=70,
-                                padding=6,
-                                border_radius=12,
-                                bgcolor=f"{PRIMARY_ACCENT}15",
-                                border=ft.border.all(1.5, PRIMARY_ACCENT),
-                                content=ft.Column(
-                                    spacing=2,
-                                    alignment=ft.MainAxisAlignment.CENTER,
-                                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                                    controls=[
-                                        ft.Text(MOOD_CONFIG.get(mood, {}).get('emoji', '🎵'), size=18),
-                                        ft.Text(mood, size=9, weight=FONT_WEIGHT_SEMIBOLD, color=TEXT_PRIMARY),
-                                    ],
-                                ),
-                                on_click=handle_emotion_click(mood),
-                            )
-                            for mood in ["Vui", "Buồn", "Suy tư", "Chill", "Nâng lương"]
-                        ],
-                    ),
-                ]),
-                padding=8,
-            ),
-        ],
-        spacing=SPACING_SM,
-        visible=(app_state.chat_flow["state"] == "await_mood"),
-    )
-    
-    intensity_section = ft.Column(
-        controls=[
-            create_glassmorphic_container(
-                ft.Column([
-                    ft.Text("Chọn mức độ:", size=11, weight=FONT_WEIGHT_SEMIBOLD, color=TEXT_PRIMARY),
-                    ft.Container(height=4),
-                    ft.Row(
-                        spacing=6,
-                        wrap=True,
-                        controls=[
-                            ft.Container(
-                                width=60,
-                                height=70,
-                                padding=6,
-                                border_radius=12,
-                                bgcolor=f"{PRIMARY_ACCENT}15",
-                                border=ft.border.all(1.5, PRIMARY_ACCENT),
-                                content=ft.Column(
-                                    spacing=2,
-                                    alignment=ft.MainAxisAlignment.CENTER,
-                                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                                    controls=[
-                                        ft.Text(INTENSITY_CONFIG.get(intensity, {}).get('emoji', '🎵'), size=18),
-                                        ft.Text(intensity, size=9, weight=FONT_WEIGHT_SEMIBOLD, color=TEXT_PRIMARY),
-                                    ],
-                                ),
-                                on_click=handle_intensity_click(intensity),
-                            )
-                            for intensity in ["Nhẹ", "Vừa", "Mạnh"]
-                        ],
-                    ),
-                ]),
-                padding=8,
-            ),
-        ],
-        spacing=SPACING_SM,
-        visible=(app_state.chat_flow["state"] == "await_intensity"),
-    )
+            chat_service.add_message("bot", "text", 
+                f"Mình đã nhận: \"{text}\". Nếu muốn đổi gợi ý, hãy chọn mood mới!")
+        start_bot_reply(apply, delay_sec=0.3)
 
     def reset_chat():
         """Reset chat"""
         chat_service.reset()
         message_field.disabled = False
-        send_btn.disabled = False
-        # Reset conversation tracking
-        app_state.chat_flow["conversation_history"] = []
-        app_state.chat_flow["conversation_turn"] = 0
-        # Friendly opening message
-        chat_service.add_message(
-            "bot", "text", 
-            "Xin chào, tớ là MMB, ngày hôm nay của bạn thế nào? 😊"
-        )
+        chat_service.add_message("bot", "text", 
+            "Chào bạn! Hôm nay bạn cảm thấy thế nào? Mình sẽ giúp bạn chọn nhạc phù hợp nhé!")
         refresh_messages()
-
-    def on_reset_click(e):
-        if app_state.chat_flow["busy"]:
-            return
-        reset_chat()
 
     def bootstrap_after_mounted():
         """Initialize chat screen after mounting"""
@@ -471,91 +423,171 @@ def create_chat_screen(page, on_history_click, on_profile_click):
         else:
             refresh_messages()
 
-    # Store bootstrap function
     app_state.set_chat_bootstrap(bootstrap_after_mounted)
 
+    # Sidebar menu item
+    def create_menu_item(icon: str, label: str, is_active: bool = False, on_click=None):
+        return ft.Container(
+            height=44,
+            border_radius=8,
+            bgcolor=TEAL_PRIMARY if is_active else "transparent",
+            padding=ft.padding.only(left=12),
+            on_click=on_click,
+            content=ft.Row([
+                ft.Text(icon, size=16, color="#FFFFFF" if is_active else "#666666"),
+                ft.Container(width=8),
+                ft.Text(label, size=14, weight=ft.FontWeight.W_500, 
+                       color="#FFFFFF" if is_active else "#1A1A1A"),
+            ], alignment=ft.MainAxisAlignment.START),
+        )
+
+    # Main layout
     return ft.Container(
         expand=True,
-        bgcolor=BG_DARK,
+        bgcolor="#FFFFFF",
         content=ft.Row([
             # Sidebar
             ft.Container(
-                width=100,
-                bgcolor=BG_DARKEST,
-                padding=SPACING_MD,
-                border=ft.border.only(right=ft.BorderSide(1, BORDER_COLOR)),
+                width=180,
+                bgcolor=SIDEBAR_BG,
+                border=ft.border.only(right=ft.BorderSide(1, "#E0E0E0")),
+                padding=ft.padding.all(16),
                 content=ft.Column([
-                    ft.Text("Menu", size=FONT_SIZE_SM, weight=FONT_WEIGHT_BOLD, color=PRIMARY_ACCENT),
-                    ft.Divider(height=SPACING_SM, color=BORDER_COLOR),
-                    ft.Container(
-                        height=50,
-                        border_radius=RADIUS_MEDIUM,
-                        gradient=ft.LinearGradient(colors=[PRIMARY_ACCENT, PRIMARY_ACCENT_DARK], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
-                        content=ft.Row(
-                            spacing=SPACING_SM,
-                            alignment=ft.MainAxisAlignment.CENTER,
-                            controls=[ft.Text("💬", size=FONT_SIZE_LG), ft.Text("Chat", size=FONT_SIZE_SM, color=TEXT_PRIMARY, weight=FONT_WEIGHT_MEDIUM)],
+                    # Logo
+                    ft.Row([
+                        ft.Container(
+                            width=32,
+                            height=32,
+                            border_radius=16,
+                            bgcolor=TEAL_PRIMARY,
+                            alignment=ft.Alignment(0,0),
+                            content=ft.Text("♪", size=16, color="#FFFFFF"),
                         ),
-                    ),
-                    ft.Container(height=SPACING_SM),
-                    ft.Container(
-                        height=50,
-                        border_radius=RADIUS_MEDIUM,
-                        gradient=ft.LinearGradient(colors=[INFO, PRIMARY_ACCENT], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
-                        on_click=on_history_click,
-                        content=ft.Row(
-                            spacing=SPACING_SM,
-                            alignment=ft.MainAxisAlignment.CENTER,
-                            controls=[ft.Text("📋", size=FONT_SIZE_LG), ft.Text("History", size=FONT_SIZE_SM, color=TEXT_PRIMARY, weight=FONT_WEIGHT_MEDIUM)],
-                        ),
-                    ),
-                    ft.Container(height=SPACING_SM),
-                    ft.Container(
-                        height=50,
-                        border_radius=RADIUS_MEDIUM,
-                        gradient=ft.LinearGradient(colors=[MOOD_VUI, WARNING], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
-                        on_click=on_profile_click,
-                        content=ft.Row(
-                            spacing=SPACING_SM,
-                            alignment=ft.MainAxisAlignment.CENTER,
-                            controls=[ft.Text("👤", size=FONT_SIZE_LG), ft.Text("Profile", size=FONT_SIZE_SM, color=TEXT_PRIMARY, weight=FONT_WEIGHT_MEDIUM)],
-                        ),
-                    ),
-                    ft.Container(height=SPACING_SM),
-                    ft.Container(
-                        height=50,
-                        border_radius=RADIUS_MEDIUM,
-                        gradient=ft.LinearGradient(colors=[ERROR, WARNING], begin=ft.Alignment(-1, 0), end=ft.Alignment(1, 0)),
-                        on_click=on_reset_click,
-                        content=ft.Row(
-                            spacing=SPACING_SM,
-                            alignment=ft.MainAxisAlignment.CENTER,
-                            controls=[ft.Text("🧹", size=FONT_SIZE_LG), ft.Text("Reset", size=FONT_SIZE_SM, color=TEXT_PRIMARY, weight=FONT_WEIGHT_MEDIUM)],
-                        ),
-                    ),
+                        ft.Container(width=8),
+                        ft.Column([
+                            ft.Text("MusicMood", size=14, weight=ft.FontWeight.W_700, color="#1A1A1A"),
+                            ft.Text("BOT", size=10, color="#888888"),
+                        ], spacing=0),
+                    ]),
+                    ft.Container(height=8),
+                    ft.Text("Menu", size=12, color="#888888"),
+                    ft.Container(height=8),
+                    # Menu items
+                    create_menu_item("💬", "Đoạn chat", is_active=True),
+                    ft.Container(height=4),
+                    create_menu_item("🕐", "Lịch sử", on_click=lambda e: on_history_click()),
+                    ft.Container(height=4),
+                    create_menu_item("👤", "Hồ sơ", on_click=lambda e: on_profile_click()),
                     ft.Container(expand=True),
-                    ft.Text("v2.0", size=FONT_SIZE_TINY, color=TEXT_MUTED, weight=FONT_WEIGHT_MEDIUM),
-                ], spacing=SPACING_SM, alignment=ft.MainAxisAlignment.START)
+                    ft.Text("MUSICMOOD V1.0", size=10, color="#AAAAAA"),
+                ]),
             ),
-            # Main chat area
+            # Main content
             ft.Container(
                 expand=True,
-                bgcolor=BG_DARK,
-                padding=SPACING_LG,
+                bgcolor=CHAT_BG,
                 content=ft.Column([
-                    ft.Text("🎵 MusicMoodBot", size=FONT_SIZE_XL, weight=FONT_WEIGHT_BOLD, color=PRIMARY_ACCENT),
-                    ft.Divider(height=SPACING_SM, color=BORDER_COLOR),
-                    ft.Container(height=SPACING_SM),
-                    create_section_spacer(SPACING_SM),
-                    ft.Container(expand=True, content=messages_list),
-                    ft.Container(height=SPACING_MD),
-                    mood_section,
-                    intensity_section,
-                    ft.Container(height=SPACING_MD),
-                    ft.Text("MusicMoodBot v2.0", size=FONT_SIZE_SM, color=TEXT_MUTED),
-                    ft.Container(height=SPACING_SM),
-                    ft.Row([message_field, send_btn]),
-                ])
+                    # Header
+                    ft.Container(
+                        height=60,
+                        bgcolor="#FFFFFF",
+                        border=ft.border.only(bottom=ft.BorderSide(1, "#E0E0E0")),
+                        padding=ft.padding.symmetric(horizontal=24),
+                        content=ft.Row([
+                            ft.Row([
+                                ft.Container(
+                                    width=40,
+                                    height=40,
+                                    border_radius=20,
+                                    bgcolor=TEAL_PRIMARY,
+                                    alignment=ft.Alignment(0,0),
+                                    content=ft.Text("🤖", size=20),
+                                ),
+                                ft.Container(width=12),
+                                ft.Column([
+                                    ft.Text("MusicMoodBot", size=16, weight=ft.FontWeight.W_600, color="#1A1A1A"),
+                                    ft.Row([
+                                        ft.Container(width=8, height=8, border_radius=4, bgcolor="#22C55E"),
+                                        ft.Text(" Online", size=12, color="#888888"),
+                                    ], spacing=0),
+                                ], spacing=2),
+                            ]),
+                            ft.Row([
+                                ft.IconButton(icon=ft.Icons.SETTINGS, icon_color="#666666", icon_size=20),
+                                ft.Container(
+                                    width=36,
+                                    height=36,
+                                    border_radius=18,
+                                    bgcolor="#E0E0E0",
+                                    alignment=ft.Alignment(0,0),
+                                    content=ft.Text("👤", size=16),
+                                ),
+                            ], spacing=8),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ),
+                    # Messages area
+                    ft.Container(
+                        expand=True,
+                        padding=ft.padding.all(24),
+                        content=ft.Column([
+                            ft.Container(expand=True, content=messages_list),
+                            mood_section,
+                            intensity_section,
+                        ]),
+                    ),
+                    # Input area
+                    ft.Container(
+                        height=70,
+                        bgcolor="#FFFFFF",
+                        border=ft.border.only(top=ft.BorderSide(1, "#E0E0E0")),
+                        padding=ft.padding.symmetric(horizontal=24, vertical=12),
+                        content=ft.Row([
+                            # Add button
+                            ft.Container(
+                                width=40,
+                                height=40,
+                                border_radius=20,
+                                bgcolor="#F0F0F0",
+                                alignment=ft.Alignment(0,0),
+                                content=ft.Text("➕", size=18),
+                            ),
+                            ft.Container(width=12),
+                            # Text input
+                            ft.Container(
+                                expand=True,
+                                height=44,
+                                border_radius=22,
+                                bgcolor="#F5F5F5",
+                                border=ft.border.all(1, "#E0E0E0"),
+                                padding=ft.padding.only(left=20, right=12),
+                                content=ft.Row([
+                                    ft.Container(expand=True, content=message_field),
+                                ]),
+                            ),
+                            ft.Container(width=12),
+                            # Send button
+                            ft.Container(
+                                width=70,
+                                height=44,
+                                border_radius=22,
+                                bgcolor=TEAL_PRIMARY,
+                                alignment=ft.Alignment(0,0),
+                                on_click=send_message,
+                                content=ft.Row([
+                                    ft.Text("Gửi", size=14, weight=ft.FontWeight.W_600, color="#FFFFFF"),
+                                    ft.Text(" ➤", size=14, color="#FFFFFF"),
+                                ], alignment=ft.MainAxisAlignment.CENTER),
+                            ),
+                        ]),
+                    ),
+                    # Footer
+                    ft.Container(
+                        height=28,
+                        bgcolor="#FFFFFF",
+                        alignment=ft.Alignment(0,0),
+                        content=ft.Text("CDIO PROJECT • VARIANT 1", size=10, color="#CCCCCC"),
+                    ),
+                ], spacing=0),
             ),
-        ])
+        ], spacing=0),
     )

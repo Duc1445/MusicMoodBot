@@ -15,7 +15,7 @@ def create_glassmorphic_container(
     padding: int = SPACING_MD,
     border_radius: int = RADIUS_LARGE,
     opacity: float = 0.95,
-    shadow=SHADOW_MEDIUM,
+    shadow=SHADOW_MEDIUM_FIGMA,
     expand: bool = False,
 ):
     """
@@ -25,9 +25,9 @@ def create_glassmorphic_container(
     return ft.Container(
         content=content,
         padding=padding,
-        bgcolor=GLASS_MEDIUM,
+        bgcolor=GLASS_MEDIUM_FIGMA,
         border_radius=border_radius,
-        border=ft.border.all(1, BORDER_COLOR),
+        border=ft.border.all(1, BORDER_COLOR_FIGMA),
         shadow=ft.BoxShadow(
             blur_radius=shadow["blur_radius"],
             color=shadow["color"],
@@ -57,13 +57,13 @@ def create_gradient_button(
             ft.Text(
                 icon,
                 size=icon_size,
-                color=TEXT_PRIMARY,
+                color=TEXT_PRIMARY_FIGMA,
             ) if icon else None,
             ft.Text(
                 text,
                 size=FONT_SIZE_LG,
                 weight=FONT_WEIGHT_SEMIBOLD,
-                color=TEXT_PRIMARY,
+                color=TEXT_PRIMARY_FIGMA,
             ),
         ],
     )
@@ -104,14 +104,14 @@ def create_text_input_professional(
             ft.Text(
                 label,
                 size=FONT_SIZE_SM,
-                color=TEXT_SECONDARY,
+                color=TEXT_SECONDARY_FIGMA,
                 weight=FONT_WEIGHT_MEDIUM,
             ),
             ft.Container(
                 height=44,
                 border_radius=RADIUS_MEDIUM,
-                bgcolor=BG_INPUT,
-                border=ft.border.all(1, BORDER_COLOR),
+                bgcolor=BG_LIGHT_INPUT,
+                border=ft.border.all(1, BORDER_COLOR_FIGMA),
                 padding=ft.padding.only(left=SPACING_MD, right=SPACING_MD),
                 content=ft.Row(
                     spacing=SPACING_SM,
@@ -124,11 +124,11 @@ def create_text_input_professional(
                             bgcolor="transparent",
                             hint_text=placeholder,
                             hint_style=ft.TextStyle(
-                                color=TEXT_MUTED,
+                                color=TEXT_MUTED_FIGMA,
                                 size=FONT_SIZE_BASE,
                             ),
                             text_style=ft.TextStyle(
-                                color=TEXT_PRIMARY,
+                                color=TEXT_PRIMARY_FIGMA,
                                 size=FONT_SIZE_BASE,
                             ),
                             password=password,
@@ -164,7 +164,7 @@ def create_mood_button_premium(
                 mood,
                 size=FONT_SIZE_SMALL,
                 weight=FONT_WEIGHT_SEMIBOLD,
-                color=TEXT_PRIMARY,
+                color=TEXT_PRIMARY_FIGMA,
             ),
         ],
     )
@@ -174,10 +174,10 @@ def create_mood_button_premium(
         height=85,
         padding=SPACING_SM,
         border_radius=RADIUS_LARGE,
-        bgcolor=GLASS_MEDIUM if not selected else f"{color}20",
+        bgcolor=GLASS_MEDIUM_FIGMA if not selected else f"{color}20",
         border=ft.border.all(
             2,
-            color if selected else BORDER_COLOR,
+            color if selected else BORDER_COLOR_FIGMA,
         ),
         shadow=ft.BoxShadow(
             blur_radius=8 if selected else 4,
@@ -205,10 +205,10 @@ def create_intensity_button_premium(
         height=75,
         padding=SPACING_SM,
         border_radius=RADIUS_LARGE,
-        bgcolor=GLASS_MEDIUM if not selected else f"{color}20",
+        bgcolor=GLASS_MEDIUM_FIGMA if not selected else f"{color}20",
         border=ft.border.all(
             2,
-            color if selected else BORDER_COLOR,
+            color if selected else BORDER_COLOR_FIGMA,
         ),
         shadow=ft.BoxShadow(
             blur_radius=8 if selected else 4,
@@ -225,7 +225,7 @@ def create_intensity_button_premium(
                     intensity,
                     size=FONT_SIZE_SMALL,
                     weight=FONT_WEIGHT_SEMIBOLD,
-                    color=TEXT_PRIMARY,
+                    color=TEXT_PRIMARY_FIGMA,
                 ),
             ],
         ),
@@ -245,9 +245,9 @@ def create_message_bubble_professional(
     is_user = sender == "user"
     
     # Determine styling based on sender
-    bubble_bgcolor = GLASS_LIGHT if is_user else f"{PRIMARY_ACCENT}20"
-    bubble_border = ft.border.all(1, PRIMARY_ACCENT if is_user else BORDER_COLOR)
-    text_color = TEXT_PRIMARY
+    bubble_bgcolor = GLASS_LIGHT_FIGMA if is_user else f"{PRIMARY_ACCENT}20"
+    bubble_border = ft.border.all(1, PRIMARY_ACCENT if is_user else BORDER_COLOR_FIGMA)
+    text_color = TEXT_PRIMARY_FIGMA
     alignment = ft.MainAxisAlignment.END if is_user else ft.MainAxisAlignment.START
     cross_alignment = ft.CrossAxisAlignment.END if is_user else ft.CrossAxisAlignment.START
     
@@ -292,14 +292,14 @@ def create_song_card_premium(
         song.get("name", "Unknown"),
         size=FONT_SIZE_XL,
         weight=FONT_WEIGHT_BOLD,
-        color=TEXT_PRIMARY,
+        color=TEXT_PRIMARY_FIGMA,
         max_lines=2,
     )
     
     song_artist = ft.Text(
         song.get("artist", "Unknown Artist"),
         size=FONT_SIZE_MD,
-        color=TEXT_SECONDARY,
+        color=TEXT_SECONDARY_FIGMA,
     )
     
     song_genre = ft.Container(
@@ -318,7 +318,7 @@ def create_song_card_premium(
     reason = ft.Text(
         song.get("reason", "Perfect match for your mood"),
         size=FONT_SIZE_SM,
-        color=TEXT_SECONDARY,
+        color=TEXT_SECONDARY_FIGMA,
         italic=True,
     )
     
@@ -362,7 +362,7 @@ def create_song_card_premium(
                         song_genre,
                     ],
                 ),
-                ft.Divider(color=BORDER_COLOR, height=1),
+                ft.Divider(color=BORDER_COLOR_FIGMA, height=1),
                 ft.Column(
                     spacing=SPACING_MD,
                     controls=[
@@ -394,14 +394,14 @@ def create_info_card_premium(
                             title,
                             size=FONT_SIZE_LG,
                             weight=FONT_WEIGHT_SEMIBOLD,
-                            color=TEXT_PRIMARY,
+                            color=TEXT_PRIMARY_FIGMA,
                         ),
                     ],
                 ),
                 ft.Text(
                     content,
                     size=FONT_SIZE_SM,
-                    color=TEXT_SECONDARY,
+                    color=TEXT_SECONDARY_FIGMA,
                 ),
             ],
         ),
@@ -428,7 +428,7 @@ def create_section_header_premium(
                         title,
                         size=FONT_SIZE_XL,
                         weight=FONT_WEIGHT_BOLD,
-                        color=TEXT_PRIMARY,
+                        color=TEXT_PRIMARY_FIGMA,
                     ),
                 ],
             ),
@@ -445,7 +445,7 @@ def create_section_header_premium(
 def create_divider_premium(opacity: float = 0.3):
     """Professional divider"""
     return ft.Divider(
-        color=f"{BORDER_COLOR}80",
+        color=f"{BORDER_COLOR_FIGMA}80",
         height=16,
     )
 

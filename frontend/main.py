@@ -32,12 +32,22 @@ def main(page: ft.Page):
     def on_login_success():
         app_state.current_screen = "chat"
         page.clean()
-        page.add(create_chat_screen(page, on_history_click, on_profile_click))
+        chat_screen = create_chat_screen(page, on_history_click, on_profile_click)
+        page.add(chat_screen)
+        # Trigger bootstrap
+        bootstrap = app_state.get_chat_bootstrap()
+        if bootstrap:
+            bootstrap()
     
     def on_signup_success():
         app_state.current_screen = "chat"
         page.clean()
-        page.add(create_chat_screen(page, on_history_click, on_profile_click))
+        chat_screen = create_chat_screen(page, on_history_click, on_profile_click)
+        page.add(chat_screen)
+        # Trigger bootstrap
+        bootstrap = app_state.get_chat_bootstrap()
+        if bootstrap:
+            bootstrap()
     
     def on_profile_click():
         app_state.current_screen = "profile"
@@ -52,7 +62,12 @@ def main(page: ft.Page):
     def on_chat_click():
         app_state.current_screen = "chat"
         page.clean()
-        page.add(create_chat_screen(page, on_history_click, on_profile_click))
+        chat_screen = create_chat_screen(page, on_history_click, on_profile_click)
+        page.add(chat_screen)
+        # Trigger bootstrap to refresh messages
+        bootstrap = app_state.get_chat_bootstrap()
+        if bootstrap:
+            bootstrap()
     
     def on_history_click():
         app_state.current_screen = "history"

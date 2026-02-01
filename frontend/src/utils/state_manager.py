@@ -18,6 +18,9 @@ class AppState:
     """Centralized application state with persistence"""
     
     def __init__(self):
+        # Dark mode state
+        self.dark_mode: bool = False
+        
         # Chat messages: [{"sender":"user"/"bot","kind":"text"/"card","text":str,"song":dict}]
         self.chat_messages: List[Dict] = []
         

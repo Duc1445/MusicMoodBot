@@ -1,10 +1,10 @@
 {
   "user_info": {
     "name": "hung",
-    "email": "hung@gmail.com",
-    "user_id": 2,
+    "email": "hung382005@gmail.com",
+    "user_id": 1,
     "preferences": {},
-    "last_login": "2026-01-28T10:08:24.299537"
+    "last_login": "2026-02-01T08:33:03.137540"
   },
   "learned_preferences": {
     "favorite_moods": [],
@@ -14,7 +14,7 @@
     "mood_history": []
   },
   "session": {
-    "start_time": "2026-01-28T10:08:12.308923",
+    "start_time": "2026-02-01T08:32:53.821604",
     "recommendations_count": 0,
     "searches_count": 0
   }

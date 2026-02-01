@@ -4,7 +4,7 @@ Reusable, stylized components with animations
 """
 
 import flet as ft
-from src.config.theme import *
+from src.config.theme_professional import *
 
 
 def create_gradient_container(
@@ -42,7 +42,7 @@ def create_glass_container(
         bgcolor=BG_CARD,
         padding=padding,
         border_radius=border_radius,
-        border=ft.border.all(1, TEXT_MUTED),
+        border=ft.border.all(1, TEXT_MUTED_FIGMA),
         shadow=ft.BoxShadow(
             blur_radius=12,
             color="#00000030",
@@ -158,7 +158,7 @@ def create_song_card_enhanced(song: dict, on_try_again=None):
                 ft.Text(
                     f"By {artist}",
                     size=FONT_SIZE_SM,
-                    color=TEXT_SECONDARY,
+                    color=TEXT_SECONDARY_FIGMA,
                 ),
                 # Genre badge
                 ft.Container(
@@ -175,7 +175,7 @@ def create_song_card_enhanced(song: dict, on_try_again=None):
                 ft.Text(
                     reason,
                     size=FONT_SIZE_SM,
-                    color=TEXT_SECONDARY,
+                    color=TEXT_SECONDARY_FIGMA,
                     italic=True,
                 ),
                 # Try again button
@@ -216,7 +216,7 @@ def create_divider():
     """Create a themed divider"""
     return ft.Container(
         height=1,
-        bgcolor=TEXT_MUTED,
+        bgcolor=TEXT_MUTED_FIGMA,
         opacity=0.3,
     )
 
@@ -277,7 +277,7 @@ def create_info_box(title: str, content: str, icon: str = "ℹ️"):
             spacing=SPACING_SM,
             controls=[
                 ft.Text(f"{icon} {title}", size=FONT_SIZE_BASE, weight=FONT_WEIGHT_BOLD, color=INFO),
-                ft.Text(content, size=FONT_SIZE_SM, color=TEXT_SECONDARY),
+                ft.Text(content, size=FONT_SIZE_SM, color=TEXT_SECONDARY_FIGMA),
             ],
         ),
     )
