@@ -59,11 +59,17 @@ def create_history_screen(on_chat_click, on_profile_click):
         mood = item.get("mood") or "N/A"
         timestamp = item.get("timestamp", "")
         
-        # Format date
+        # Format date with local timezone
         try:
+            from datetime import timezone
+            # Parse as UTC and convert to local
             dt = datetime.fromisoformat(timestamp)
-            date_str = dt.strftime("%d/%m/%Y")
-            time_str = dt.strftime("%H:%M %p")
+            # Add UTC timezone if naive, then convert to local
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            local_dt = dt.astimezone()
+            date_str = local_dt.strftime("%d/%m/%Y")
+            time_str = local_dt.strftime("%H:%M")
         except:
             date_str = "N/A"
             time_str = ""

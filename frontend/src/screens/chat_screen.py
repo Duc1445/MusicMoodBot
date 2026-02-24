@@ -3,13 +3,10 @@ Chat screen for MusicMoodBot - Figma Design 1:1
 """
 
 import flet as ft
-import threading
-import time
 from datetime import datetime
 from src.config.theme_professional import *
 from src.services.chat_service import chat_service
 from src.utils.state_manager import app_state
-from src.utils.helpers import _make_progress, _ui_safe
 
 
 # Figma color scheme
@@ -96,6 +93,15 @@ def create_chat_screen(page, on_history_click, on_profile_click):
 
     def create_song_card(song: dict):
         """Create song recommendation card (Figma style)"""
+        def on_try_again(e):
+            if not app_state.chat_flow["busy"]:
+                app_state.chat_flow["state"] = "chatting"
+                
+                def apply():
+                    make_recommendation(try_again=True)
+                
+                do_bot_reply(apply)
+        
         return ft.Container(
             margin=ft.margin.only(left=44),
             padding=ft.padding.all(16),
@@ -125,6 +131,17 @@ def create_chat_screen(page, on_history_click, on_profile_click):
                                size=12, color="#888888"),
                     ], spacing=0),
                 ], spacing=4, expand=True),
+                # Refresh button
+                ft.Container(
+                    width=40,
+                    height=40,
+                    border_radius=20,
+                    bgcolor="#F5F5F5",
+                    alignment=ft.Alignment(0,0),
+                    on_click=on_try_again,
+                    content=ft.Text("🔄", size=16),
+                ),
+                ft.Container(width=8),
                 # Play button
                 ft.Container(
                     width=44,
@@ -254,14 +271,18 @@ def create_chat_screen(page, on_history_click, on_profile_click):
                         bgcolor="#FFFFFF",
                         border=ft.border.all(1, "#E0E0E0"),
                         content=ft.Row([
-                            _make_progress(),
+                            ft.ProgressRing(width=16, height=16, stroke_width=2),
                             ft.Text(" Đang nhập...", size=13, color="#888888"),
                         ]),
                     ),
                 ])
             )
 
-        page.update()
+        # Safe UI update - works from any thread in Flet
+        try:
+            page.update()
+        except Exception as e:
+            print(f"Page update error: {e}")
 
     def make_recommendation(try_again: bool = False):
         """Generate and display recommendation with Top 3 songs"""
@@ -277,34 +298,41 @@ def create_chat_screen(page, on_history_click, on_profile_click):
             intensity = new_intensity
             app_state.chat_flow["intensity"] = intensity
         
-        # Get 3 different songs for Top 3
+        # Get 3 different songs for Top 3 with error handling
         songs = []
         used_names = set()
-        for _ in range(3):
-            song = chat_service.pick_song(mood)
-            # Avoid duplicate songs
-            song_name = song.get("name", "") if isinstance(song, dict) else ""
-            if song_name not in used_names:
-                songs.append(song)
-                used_names.add(song_name)
+        max_attempts = 10
+        attempts = 0
         
-        # Fill remaining slots if we have duplicates
-        while len(songs) < 3:
-            song = chat_service.pick_song(mood)
-            song_name = song.get("name", "") if isinstance(song, dict) else ""
-            if song_name not in used_names:
-                songs.append(song)
-                used_names.add(song_name)
+        while len(songs) < 3 and attempts < max_attempts:
+            attempts += 1
+            try:
+                song = chat_service.pick_song(mood)
+                # Avoid duplicate songs
+                song_name = song.get("name", "") if isinstance(song, dict) else ""
+                if song_name and song_name not in used_names and song_name != "No songs found":
+                    songs.append(song)
+                    used_names.add(song_name)
+            except Exception as e:
+                print(f"Error picking song: {e}")
+                break
+        
+        # If no songs found, add a default message
+        if not songs:
+            chat_service.add_message("bot", "text", "Xin lỗi, không tìm thấy bài hát phù hợp. Hãy thử chọn mood khác nhé!")
+            app_state.chat_flow["state"] = "await_mood"
+            app_state.chat_flow["mood"] = None
+            return
 
         text = (
-            f"Dựa trên cảm xúc và thể loại bạn chọn, đây là Top 3 bài hát phù hợp nhất cho bạn hôm nay:"
+            f"Dựa trên cảm xúc và thể loại bạn chọn, đây là Top {len(songs)} bài hát phù hợp nhất cho bạn hôm nay:"
             if not try_again
             else f"Đây là gợi ý khác cho bạn (mood: {mood}, intensity: {intensity}):"
         )
 
         chat_service.add_message("bot", "text", text)
         
-        # Add all 3 song cards
+        # Add all song cards
         for song in songs:
             chat_service.add_message("bot", "card", song=song)
             song_id = song.get("song_id") if isinstance(song, dict) else None
@@ -313,47 +341,48 @@ def create_chat_screen(page, on_history_click, on_profile_click):
         app_state.chat_flow["state"] = "await_mood"
         app_state.chat_flow["mood"] = None
 
-    def start_bot_reply(apply_fn, delay_sec: float = 0.3):
-        """Start bot typing indicator and apply function"""
+    def do_bot_reply(apply_fn):
+        """Execute bot reply synchronously - no threading"""
         set_busy(True)
-        app_state.typing_on["value"] = True
+        
+        # Execute the apply function directly
+        try:
+            apply_fn()
+        except Exception as e:
+            print(f"Error in apply_fn: {e}")
+            chat_service.add_message("bot", "text", "Đã có lỗi xảy ra, vui lòng thử lại.")
+        
+        # Reset busy state and refresh UI
+        set_busy(False)
         refresh_messages()
-
-        def worker():
-            if delay_sec > 0:
-                time.sleep(delay_sec)
-
-            def finish():
-                app_state.typing_on["value"] = False
-                apply_fn()
-                set_busy(False)
-                refresh_messages()
-
-            _ui_safe(page, finish)
-
-        threading.Thread(target=worker, daemon=True).start()
 
     def handle_mood_selection(mood: str):
-        """Handle mood chip click"""
+        """Handle mood chip click - no threading for simple message"""
+        if app_state.chat_flow["busy"]:
+            return
+            
         chat_service.add_message("user", "text", f"Mood: {mood}")
         app_state.chat_flow["mood"] = mood
+        app_state.chat_flow["state"] = "await_intensity"
+        
+        # Add bot message directly without typing indicator delay
+        chat_service.add_message("bot", "text", "Bạn muốn mức độ nào? (Nhẹ / Vừa / Mạnh)")
         refresh_messages()
 
-        def apply():
-            app_state.chat_flow["state"] = "await_intensity"
-            chat_service.add_message("bot", "text", "Bạn muốn mức độ nào? (Nhẹ / Vừa / Mạnh)")
-
-        start_bot_reply(apply, delay_sec=0.5)
-
     def handle_intensity_selection(intensity: str):
-        """Handle intensity chip click"""
+        """Handle intensity chip click - synchronous"""
+        if app_state.chat_flow["busy"]:
+            return
+            
         chat_service.add_message("user", "text", f"Intensity: {intensity}")
         app_state.chat_flow["intensity"] = intensity
         app_state.chat_flow["state"] = "chatting"
         refresh_messages()
-        
-        make_recommendation()
-        refresh_messages()
+
+        def apply():
+            make_recommendation()
+
+        do_bot_reply(apply)
 
     def send_message(e):
         """Handle message sending"""
@@ -370,10 +399,9 @@ def create_chat_screen(page, on_history_click, on_profile_click):
         st = app_state.chat_flow["state"]
 
         if st == "await_mood":
-            def apply():
-                chat_service.add_message("bot", "text", 
-                    "Mình hiểu rồi! Bạn có thể chọn mood bằng nút bên dưới hoặc tiếp tục chia sẻ 😊")
-            start_bot_reply(apply, delay_sec=0.3)
+            chat_service.add_message("bot", "text", 
+                "Mình hiểu rồi! Bạn có thể chọn mood bằng nút bên dưới hoặc tiếp tục chia sẻ 😊")
+            refresh_messages()
             return
         
         if st == "await_intensity":
@@ -391,22 +419,22 @@ def create_chat_screen(page, on_history_click, on_profile_click):
                     break
             
             if detected_intensity:
+                app_state.chat_flow["intensity"] = detected_intensity
+                app_state.chat_flow["state"] = "chatting"
+                
                 def apply():
-                    app_state.chat_flow["intensity"] = detected_intensity
-                    app_state.chat_flow["state"] = "chatting"
                     make_recommendation()
-                start_bot_reply(apply, delay_sec=0.3)
+                    
+                do_bot_reply(apply)
                 return
             
-            def apply():
-                chat_service.add_message("bot", "text", "Hãy chọn intensity: Nhẹ, Vừa, hoặc Mạnh")
-            start_bot_reply(apply, delay_sec=0.3)
+            chat_service.add_message("bot", "text", "Hãy chọn intensity: Nhẹ, Vừa, hoặc Mạnh")
+            refresh_messages()
             return
 
-        def apply():
-            chat_service.add_message("bot", "text", 
-                f"Mình đã nhận: \"{text}\". Nếu muốn đổi gợi ý, hãy chọn mood mới!")
-        start_bot_reply(apply, delay_sec=0.3)
+        chat_service.add_message("bot", "text", 
+            f"Mình đã nhận: \"{text}\". Nếu muốn đổi gợi ý, hãy chọn mood mới!")
+        refresh_messages()
 
     def reset_chat():
         """Reset chat"""

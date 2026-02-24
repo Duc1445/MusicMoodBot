@@ -55,7 +55,7 @@ def seed_sample_songs():
     cursor.execute("SELECT COUNT(*) FROM songs")
     if cursor.fetchone()[0] == 0:
         songs = [
-            ("Bước Qua Nhau", "V.O.", "V-Pop", 8.5, "Uplifting melody", "Vui"),
+            ("Bước Qua Nhau", "Vũ.", "V-Pop", 8.5, "Uplifting melody", "Vui"),
             ("Có Chàng Trai Viết Lên Cây", "Phan Mạnh Quỳnh", "V-Pop", 8.0, "Romantic", "Suy tư"),
             ("Nơi Này Có Anh", "Sơn Tùng M-TP", "V-Pop", 7.8, "Emotional", "Buồn"),
         ]

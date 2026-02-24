@@ -163,7 +163,10 @@ class ChatService:
             "Buồn": "sad",
             "Suy tư": "stress",
             "Chill": "happy",
-            "Năng lượng": "energetic"
+            "Năng lượng": "energetic",
+            "Năng động": "energetic",
+            "Thư giãn": "happy",
+            "Tập trung": "stress"
         }
         return mapping.get(mood_vi, "happy")
     
