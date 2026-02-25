@@ -1,38 +1,53 @@
 """
 History service for MusicMoodBot
 Handles loading and displaying user chat history
+Integrated with v1 Production API
 """
 
-from backend.src.database.database import get_user_recommendations
-from ..utils.state_manager import app_state
+import requests
+from typing import List, Dict
+from src.utils.state_manager import app_state
+
+
+# API Configuration
+API_BASE_URL = "http://localhost:8000"
+API_V1_URL = f"{API_BASE_URL}/api/v1"
+API_TIMEOUT = 10  # seconds
 
 
 class HistoryService:
-    """Handles chat history operations"""
+    """Handles chat history operations via v1 API"""
     
     @staticmethod
-    def load_user_history() -> list:
-        """Load recommendations history for current user"""
-        if not app_state.user_info["user_id"]:
+    def load_user_history(limit: int = 50) -> List[Dict]:
+        """Load recommendations history for current user via API"""
+        if not app_state.user_info.get("user_id"):
             return []
         
         try:
-            # Use get_user_recommendations instead of get_user_chat_history
-            history = get_user_recommendations(app_state.user_info["user_id"])
+            user_id = app_state.user_info["user_id"]
+            response = requests.get(
+                f"{API_V1_URL}/user/history",
+                params={"user_id": user_id, "limit": limit},
+                timeout=API_TIMEOUT
+            )
             
-            # Map field names for UI compatibility
-            for item in history:
-                # song_name is now correctly returned from JOIN
-                if "song_name" not in item and "name" in item:
-                    item["song_name"] = item["name"]
-                # artist field (not artist_name)
-                if "song_artist" not in item and "artist" in item:
-                    item["song_artist"] = item["artist"]
-            
-            return history if history else []
+            if response.status_code == 200:
+                data = response.json()
+                history = data.get("history", [])
+                
+                # Normalize field names for UI compatibility
+                for item in history:
+                    if "song_name" not in item and "name" in item:
+                        item["song_name"] = item["name"]
+                    if "song_artist" not in item and "artist" in item:
+                        item["song_artist"] = item["artist"]
+                
+                return history
         except Exception as e:
             print(f"Error loading history: {e}")
-            return []
+        
+        return []
     
     @staticmethod
     def format_history_item(item: dict) -> str:
@@ -42,20 +57,23 @@ class HistoryService:
         
         mood = item.get("mood", "N/A")
         intensity = item.get("intensity", "N/A")
-        timestamp = item.get("timestamp", "")
+        timestamp = item.get("listened_at") or item.get("timestamp", "")
         
         # Parse timestamp
         if timestamp:
             try:
                 from datetime import datetime
-                dt = datetime.fromisoformat(timestamp)
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 time_str = dt.strftime("%H:%M")
             except:
                 time_str = timestamp[:5] if timestamp else ""
         else:
             time_str = ""
         
-        return f"[{time_str}] Mood: {mood} | Intensity: {intensity}"
+        song_name = item.get("song_name") or item.get("name", "Unknown")
+        artist = item.get("artist", "")
+        
+        return f"[{time_str}] {song_name} - {artist} | {mood}"
     
     @staticmethod
     def get_history_summary() -> dict:
@@ -72,7 +90,7 @@ class HistoryService:
         # Count moods
         mood_count = {}
         for item in history:
-            mood = item.get("mood")
+            mood = item.get("mood") or item.get("mood_at_time")
             if mood:
                 mood_count[mood] = mood_count.get(mood, 0) + 1
         

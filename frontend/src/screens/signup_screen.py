@@ -3,8 +3,8 @@ Signup screen for MusicMoodBot - Figma Design 1:1
 """
 
 import flet as ft
-from ..config.theme_professional import *
-from ..services.auth_service import auth_service
+from src.config.theme_professional import *
+from src.services.auth_service import auth_service
 
 
 def create_signup_screen(on_login_click, on_signup_submit):

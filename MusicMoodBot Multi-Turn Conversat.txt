@@ -1,0 +1,2876 @@
+# MusicMoodBot Multi-Turn Conversation System Architecture
+
+---
+
+## 1. Schema Analysis
+
+### 1.1 Current Schema Audit
+
+| Table | Purpose | Status | Action |
+|-------|---------|--------|--------|
+| `chat_history` | Logs mood/intensity/song per message | **REDUNDANT** | Merge into `listening_history` |
+| `listening_history` | Detailed listening with session_id | **KEEP** | Extend with conversation fields |
+| `feedback` | Like/dislike/skip signals | **KEEP** | Add emotional context |
+| `recommendation_history` | Session-level recommendations | **REDUNDANT** | Merge into `recommendations` |
+| `recommendations` | Individual recommendation records | **KEEP** | Add conversation_session_id |
+| `user_preferences` | Preference weights | **KEEP** | No changes |
+| `user_preferences_old` | Legacy table | **DELETE** | Drop after backup |
+| `user_interactions` | Event tracking | **KEEP** | Extend for conversation events |
+| `playlists`, `playlist_songs`, `playlist_follows` | Playlist management | **KEEP** | No changes |
+| `songs` | Song metadata | **KEEP** | No changes |
+| `users` | User accounts | **KEEP** | Add conversation preferences |
+
+### 1.2 Redundancy Analysis
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        SCHEMA REDUNDANCY MAP                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  chat_history ──────┐                                                       │
+│    (mood, song_id)  │                                                       │
+│                     ├──► MERGE INTO listening_history                       │
+│  listening_history ─┘                                                       │
+│    (mood, song_id, session_id, input_text)                                 │
+│                                                                             │
+│  recommendation_history ───┐                                                │
+│    (song_id, session_id)   │                                               │
+│                            ├──► MERGE INTO recommendations                  │
+│  recommendations ──────────┘                                                │
+│    (user_id, song_id, mood)                                                │
+│                                                                             │
+│  user_preferences_old ──────► DELETE (backup first)                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 1.3 Tables That Must Remain Unchanged
+
+| Table | Reason |
+|-------|--------|
+| `songs` | Core song catalog; 40+ audio features; no modification needed |
+| `users` | Auth foundation; only add optional fields |
+| `feedback` | Training data for PreferenceModel; critical for ML pipeline |
+| `user_preferences` | Dynamic preference weights; used by recommendation engine |
+| `playlists`, `playlist_songs`, `playlist_follows` | Playlist management; independent subsystem |
+
+---
+
+## 2. Proposed Database Changes
+
+### 2.1 New Tables
+
+```sql
+-- =============================================================================
+-- TABLE: conversation_sessions
+-- Purpose: Track multi-turn conversation sessions
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS conversation_sessions (
+    session_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    
+    -- State Machine
+    state TEXT NOT NULL DEFAULT 'GREETING'
+        CHECK(state IN (
+            'GREETING', 'PROBING_MOOD', 'PROBING_DEPTH', 
+            'PROBING_CONTEXT', 'PROBING_INTENT', 'CONFIRMING',
+            'RECOMMENDING', 'REFINING', 'TERMINATED', 'ERROR'
+        )),
+    
+    -- Metrics
+    turn_count INTEGER NOT NULL DEFAULT 0,
+    clarity_score REAL DEFAULT 0.0,
+    
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    
+    -- Concurrency Control
+    version INTEGER NOT NULL DEFAULT 1,
+    is_active BOOLEAN DEFAULT TRUE,
+    
+    -- Outcome
+    final_mood TEXT,
+    final_intensity TEXT,
+    playlist_id TEXT,
+    
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (playlist_id) REFERENCES playlists(playlist_id)
+);
+
+CREATE INDEX idx_sessions_user_active ON conversation_sessions(user_id, is_active);
+CREATE INDEX idx_sessions_expires ON conversation_sessions(expires_at);
+
+
+-- =============================================================================
+-- TABLE: conversation_turns
+-- Purpose: Store individual conversation turns with emotional signals
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS conversation_turns (
+    turn_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    turn_number INTEGER NOT NULL,
+    
+    -- Content
+    role TEXT NOT NULL CHECK(role IN ('user', 'bot')),
+    content TEXT NOT NULL,
+    
+    -- State at Turn
+    state_before TEXT NOT NULL,
+    state_after TEXT NOT NULL,
+    
+    -- Emotional Signals (JSON for flexibility)
+    detected_mood TEXT,
+    mood_confidence REAL,
+    intensity TEXT,
+    keywords_detected TEXT,  -- JSON array
+    
+    -- Context Signals
+    temporal_context TEXT,    -- 'past', 'present', 'anticipatory'
+    social_context TEXT,      -- 'alone', 'with_others'
+    activity_context TEXT,    -- 'working', 'relaxing', 'exercising', etc.
+    energy_preference TEXT,   -- 'low', 'medium', 'high'
+    
+    -- Clarity Metrics
+    clarity_score_delta REAL DEFAULT 0.0,
+    cumulative_clarity REAL DEFAULT 0.0,
+    
+    -- Response Metadata
+    response_type TEXT CHECK(response_type IN ('greeting', 'probing', 'confirmation', 'recommendation', 'refinement')),
+    quick_replies TEXT,  -- JSON array of suggested responses
+    
+    -- Timing
+    processing_latency_ms INTEGER,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_turns_session ON conversation_turns(session_id, turn_number);
+CREATE INDEX idx_turns_mood ON conversation_turns(detected_mood);
+
+
+-- =============================================================================
+-- TABLE: emotional_contexts
+-- Purpose: Accumulated emotional state per session
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS emotional_contexts (
+    context_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL UNIQUE,
+    
+    -- Primary Mood Detection
+    primary_mood TEXT,
+    mood_confidence REAL DEFAULT 0.0,
+    intensity_level TEXT DEFAULT 'Vừa',
+    
+    -- Mood Evolution (JSON array of {turn, mood, confidence})
+    mood_history TEXT DEFAULT '[]',
+    
+    -- Context Signals
+    temporal_context TEXT,
+    social_context TEXT,
+    activity_intent TEXT,
+    energy_preference TEXT,
+    
+    -- Explicit User Requests
+    explicit_genres TEXT,     -- JSON array
+    explicit_artists TEXT,    -- JSON array
+    explicit_requests TEXT,   -- JSON array of free-form requests
+    
+    -- Accumulated Keywords
+    keywords_accumulated TEXT DEFAULT '[]',
+    
+    -- Consistency Metrics
+    mood_consistency_score REAL DEFAULT 0.5,
+    intent_clarity_score REAL DEFAULT 0.0,
+    
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE CASCADE
+);
+
+
+-- =============================================================================
+-- TABLE: probing_questions
+-- Purpose: Question bank with usage tracking
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS probing_questions (
+    question_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    
+    -- Targeting
+    target_state TEXT NOT NULL,
+    target_field TEXT,  -- Which context field this probes
+    
+    -- Content
+    text_vi TEXT NOT NULL,
+    text_en TEXT,
+    quick_replies TEXT,  -- JSON array
+    
+    -- A/B Testing
+    variant TEXT DEFAULT 'A',
+    
+    -- Usage Stats
+    usage_count INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0.0,  -- How often it led to clarity increase
+    
+    -- Conditions (JSON expression for when to use)
+    condition_expr TEXT DEFAULT 'true',
+    
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- =============================================================================
+-- TABLE: idempotency_keys
+-- Purpose: Prevent duplicate turn processing
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    key_hash TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    
+    FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_idempotency_expires ON idempotency_keys(expires_at);
+```
+
+### 2.2 Schema Modifications to Existing Tables
+
+```sql
+-- =============================================================================
+-- MODIFY: recommendations
+-- Add conversation context
+-- =============================================================================
+ALTER TABLE recommendations ADD COLUMN conversation_session_id TEXT
+    REFERENCES conversation_sessions(session_id);
+ALTER TABLE recommendations ADD COLUMN context_json TEXT;  -- Full context snapshot
+
+
+-- =============================================================================
+-- MODIFY: feedback
+-- Add emotional context for ML training
+-- =============================================================================
+ALTER TABLE feedback ADD COLUMN conversation_session_id TEXT
+    REFERENCES conversation_sessions(session_id);
+ALTER TABLE feedback ADD COLUMN emotional_context_snapshot TEXT;  -- JSON
+
+
+-- =============================================================================
+-- MODIFY: users
+-- Add conversation preferences
+-- =============================================================================
+ALTER TABLE users ADD COLUMN conversation_style TEXT DEFAULT 'balanced'
+    CHECK(conversation_style IN ('brief', 'balanced', 'detailed'));
+ALTER TABLE users ADD COLUMN probing_preference INTEGER DEFAULT 3
+    CHECK(probing_preference BETWEEN 1 AND 5);
+```
+
+### 2.3 Cleanup Migrations
+
+```sql
+-- =============================================================================
+-- CLEANUP: Remove redundant tables (run after data migration)
+-- =============================================================================
+
+-- Step 1: Backup redundant tables
+CREATE TABLE _backup_chat_history AS SELECT * FROM chat_history;
+CREATE TABLE _backup_recommendation_history AS SELECT * FROM recommendation_history;
+CREATE TABLE _backup_user_preferences_old AS SELECT * FROM user_preferences_old;
+
+-- Step 2: Migrate chat_history data to listening_history
+INSERT INTO listening_history (user_id, song_id, mood, input_type, created_at)
+SELECT user_id, song_id, mood, 'text', timestamp 
+FROM chat_history 
+WHERE song_id IS NOT NULL
+AND NOT EXISTS (
+    SELECT 1 FROM listening_history lh 
+    WHERE lh.user_id = chat_history.user_id 
+    AND lh.song_id = chat_history.song_id
+    AND lh.created_at = chat_history.timestamp
+);
+
+-- Step 3: Migrate recommendation_history to recommendations
+INSERT INTO recommendations (user_id, song_id, mood, timestamp)
+SELECT 
+    (SELECT user_id FROM users LIMIT 1),  -- Or derive from session
+    song_id, mood, recommend_date
+FROM recommendation_history
+WHERE song_id IS NOT NULL
+AND NOT EXISTS (
+    SELECT 1 FROM recommendations r 
+    WHERE r.song_id = recommendation_history.song_id
+    AND DATE(r.timestamp) = recommendation_history.recommend_date
+);
+
+-- Step 4: Drop redundant tables (ONLY after verification)
+-- DROP TABLE chat_history;
+-- DROP TABLE recommendation_history;
+-- DROP TABLE user_preferences_old;
+```
+
+---
+
+## 3. Conversation Architecture
+
+### 3.1 Module Structure
+
+```
+backend/services/conversation/
+├── __init__.py
+├── manager.py              # ConversationManager (main orchestrator)
+├── state_machine.py        # DialogueFSM
+├── emotion_tracker.py      # EmotionDepthTracker
+├── clarity_scorer.py       # EmotionClarityModel
+├── intent_classifier.py    # IntentClassifier  
+├── strategy_engine.py      # ClarificationStrategyEngine
+├── question_bank.py        # ProbeQuestionBank
+├── session_store.py        # SessionStore (persistence)
+├── context_extractor.py    # ContextSignalExtractor
+└── types.py                # Data classes and enums
+```
+
+### 3.2 Component Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              ConversationManager                                │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │                         PUBLIC INTERFACE                                 │   │
+│  │  start_session()  │  process_turn()  │  abort_session()                 │   │
+│  └──────────────────────────────┬──────────────────────────────────────────┘   │
+│                                 │                                               │
+│  ┌──────────────────────────────▼──────────────────────────────────────────┐   │
+│  │                         CORE COMPONENTS                                  │   │
+│  │                                                                          │   │
+│  │  ┌─────────────┐     ┌─────────────┐     ┌─────────────────────────┐   │   │
+│  │  │ DialogueFSM │◄───►│ EmotionDepth│◄───►│ ClarificationStrategy   │   │   │
+│  │  │             │     │ Tracker     │     │ Engine                  │   │   │
+│  │  │ • States    │     │             │     │                         │   │   │
+│  │  │ • Guards    │     │ • Signals   │     │ • Question Selection    │   │   │
+│  │  │ • Transitions│    │ • History   │     │ • Depth Probing         │   │   │
+│  │  └──────┬──────┘     └──────┬──────┘     └───────────┬─────────────┘   │   │
+│  │         │                   │                        │                  │   │
+│  │         ▼                   ▼                        ▼                  │   │
+│  │  ┌─────────────────────────────────────────────────────────────────┐   │   │
+│  │  │                    EmotionClarityModel                          │   │   │
+│  │  │  clarity = Σ(weight[i] × component_score[i])                    │   │   │
+│  │  │  Components: mood, intensity, confidence, context, consistency  │   │   │
+│  │  └─────────────────────────────┬───────────────────────────────────┘   │   │
+│  │                                │                                        │   │
+│  │                                ▼                                        │   │
+│  │  ┌─────────────────────────────────────────────────────────────────┐   │   │
+│  │  │                      SessionStore                                │   │   │
+│  │  │  • SQLite (current)  • Redis (future)  • TTL Management         │   │   │
+│  │  └─────────────────────────────────────────────────────────────────┘   │   │
+│  └──────────────────────────────────────────────────────────────────────────┘   │
+│                                 │                                               │
+│                                 ▼                                               │
+│  ┌──────────────────────────────────────────────────────────────────────────┐  │
+│  │                    INTEGRATION ADAPTERS                                   │  │
+│  │  ┌─────────────┐     ┌─────────────┐     ┌─────────────────────────┐    │  │
+│  │  │TextMood     │     │ Intent      │     │ Context Signal          │    │  │
+│  │  │Detector     │     │ Classifier  │     │ Extractor               │    │  │
+│  │  │(existing)   │     │ (new)       │     │ (new)                   │    │  │
+│  │  └─────────────┘     └─────────────┘     └─────────────────────────┘    │  │
+│  └──────────────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────┬────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                        ChatOrchestrator (Existing, Extended)                   │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐                   │
+│  │TextMood   │  │MoodEngine │  │Preference │  │Curator    │                   │
+│  │Detector   │  │           │  │Model      │  │Engine     │                   │
+│  └───────────┘  └───────────┘  └───────────┘  └───────────┘                   │
+│                                                                                │
+│  NEW METHOD: process_enriched_request(EnrichedRequest) → ChatResponse         │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 3.3 Data Flow Sequence
+
+```
+┌────────┐     ┌─────────────────┐     ┌─────────────┐     ┌────────────────┐
+│ User   │     │ ConversationMgr │     │ SessionStore│     │ ChatOrchestrator│
+└───┬────┘     └────────┬────────┘     └──────┬──────┘     └───────┬────────┘
+    │                   │                     │                    │
+    │ send_message()    │                     │                    │
+    │──────────────────►│                     │                    │
+    │                   │ get_session()       │                    │
+    │                   │────────────────────►│                    │
+    │                   │◄────────────────────│                    │
+    │                   │                     │                    │
+    │                   │ extract_signals()   │                    │
+    │                   │─────────┐           │                    │
+    │                   │◄────────┘           │                    │
+    │                   │                     │                    │
+    │                   │ update_context()    │                    │
+    │                   │─────────┐           │                    │
+    │                   │◄────────┘           │                    │
+    │                   │                     │                    │
+    │                   │ calculate_clarity() │                    │
+    │                   │─────────┐           │                    │
+    │                   │◄────────┘           │                    │
+    │                   │                     │                    │
+    │                   │ fsm.transition()    │                    │
+    │                   │─────────┐           │                    │
+    │                   │◄────────┘           │                    │
+    │                   │                     │                    │
+    ├───────────────────┼─────────────────────┼────────────────────┤
+    │                   │ [IF clarity >= threshold]                │
+    ├───────────────────┼─────────────────────┼────────────────────┤
+    │                   │                     │                    │
+    │                   │ build_enriched_request()                 │
+    │                   │─────────────────────┼───────────────────►│
+    │                   │                     │                    │
+    │                   │◄────────────────────┼────────────────────│
+    │                   │                     │  ChatResponse      │
+    │                   │                     │                    │
+    ├───────────────────┼─────────────────────┼────────────────────┤
+    │                   │ [ELSE: need more probing]                │
+    ├───────────────────┼─────────────────────┼────────────────────┤
+    │                   │                     │                    │
+    │                   │ select_question()   │                    │
+    │                   │─────────┐           │                    │
+    │                   │◄────────┘           │                    │
+    │                   │                     │                    │
+    │                   │ save_session()      │                    │
+    │                   │────────────────────►│                    │
+    │                   │                     │                    │
+    │◄──────────────────│                     │                    │
+    │ ConversationTurn  │                     │                    │
+    │ (question/playlist)│                    │                    │
+    │                   │                     │                    │
+```
+
+### 3.4 Component Specifications
+
+#### 3.4.1 ConversationManager
+
+```python
+# backend/services/conversation/manager.py
+
+class ConversationManager:
+    """
+    Main orchestrator for multi-turn conversations.
+    
+    Responsibilities:
+    - Session lifecycle management
+    - Turn processing pipeline
+    - Clarity-based decision making
+    - Delegation to ChatOrchestrator
+    """
+    
+    def __init__(
+        self,
+        session_store: SessionStore,
+        chat_orchestrator: ChatOrchestrator,
+        text_detector: TextMoodDetector,
+        clarity_threshold: float = 0.70,
+        max_turns: int = 5,
+        session_ttl_minutes: int = 30
+    ):
+        self.session_store = session_store
+        self.orchestrator = chat_orchestrator
+        self.text_detector = text_detector
+        self.clarity_threshold = clarity_threshold
+        self.max_turns = max_turns
+        self.session_ttl = timedelta(minutes=session_ttl_minutes)
+        
+        # Sub-components
+        self.fsm = DialogueFSM()
+        self.clarity_scorer = EmotionClarityModel()
+        self.strategy_engine = ClarificationStrategyEngine()
+        self.intent_classifier = IntentClassifier()
+        self.context_extractor = ContextSignalExtractor()
+        self.question_bank = ProbeQuestionBank()
+    
+    async def start_session(self, user_id: int) -> ConversationSession:
+        """
+        Initialize new conversation session.
+        
+        Returns:
+            ConversationSession with initial greeting
+        """
+        # Check for existing active session
+        existing = await self.session_store.get_active_for_user(user_id)
+        if existing:
+            # Option: Resume or terminate existing
+            await self.session_store.terminate(existing.session_id)
+        
+        session_id = f"conv_{user_id}_{uuid4().hex[:8]}"
+        session = ConversationSession(
+            session_id=session_id,
+            user_id=user_id,
+            state=DialogueState.GREETING,
+            context=EmotionalContext(),
+            created_at=datetime.utcnow(),
+            expires_at=datetime.utcnow() + self.session_ttl
+        )
+        
+        await self.session_store.save(session)
+        return session
+    
+    async def process_turn(
+        self,
+        session_id: str,
+        user_input: str,
+        idempotency_key: Optional[str] = None
+    ) -> ConversationTurn:
+        """
+        Process single conversation turn.
+        
+        Pipeline:
+        1. Load session (with optimistic lock)
+        2. Check idempotency
+        3. Extract emotional signals
+        4. Update context
+        5. Calculate clarity
+        6. FSM transition
+        7. Generate response (probing OR recommendation)
+        8. Persist state
+        
+        Returns:
+            ConversationTurn with bot response
+        """
+        # Step 1: Load session
+        session = await self.session_store.get_with_lock(session_id)
+        if not session:
+            raise SessionNotFoundError(session_id)
+        if session.is_expired:
+            raise SessionExpiredError(session_id)
+        
+        # Step 2: Idempotency check
+        if idempotency_key:
+            cached = await self.session_store.get_cached_response(
+                session_id, idempotency_key
+            )
+            if cached:
+                return cached
+        
+        # Step 3: Check for early exit request
+        if self.fsm.can_early_exit(session.context, user_input):
+            session.state = DialogueState.RECOMMENDING
+        
+        # Step 4: Extract signals from input
+        signals = await self._extract_signals(user_input, session.context)
+        
+        # Step 5: Update emotional context
+        session.context.update(signals)
+        session.turn_count += 1
+        
+        # Step 6: Calculate clarity score
+        clarity = self.clarity_scorer.calculate(session.context)
+        session.context.clarity_score = clarity
+        
+        # Step 7: FSM transition
+        state_before = session.state
+        next_state = self.fsm.transition(
+            current_state=session.state,
+            context=session.context,
+            turn_count=session.turn_count
+        )
+        session.state = next_state
+        
+        # Step 8: Generate response based on state
+        if next_state == DialogueState.RECOMMENDING:
+            response = await self._generate_recommendation(session)
+        elif next_state == DialogueState.TERMINATED:
+            response = self._generate_farewell(session)
+        elif next_state == DialogueState.ERROR:
+            response = self._generate_error_recovery(session)
+        else:
+            response = await self._generate_probing_response(session)
+        
+        # Step 9: Create turn record
+        turn = ConversationTurn(
+            turn_number=session.turn_count,
+            user_input=user_input,
+            bot_response=response,
+            state_before=state_before,
+            state_after=next_state,
+            detected_mood=signals.mood,
+            mood_confidence=signals.mood_confidence,
+            clarity_score=clarity,
+            processing_latency_ms=0  # Measured elsewhere
+        )
+        session.turns.append(turn)
+        
+        # Step 10: Persist
+        if idempotency_key:
+            await self.session_store.cache_response(
+                session_id, idempotency_key, turn
+            )
+        await self.session_store.save(session)
+        
+        return turn
+    
+    async def _extract_signals(
+        self,
+        user_input: str,
+        existing_context: EmotionalContext
+    ) -> EmotionalSignals:
+        """Extract all emotional and contextual signals from input."""
+        # Use existing TextMoodDetector
+        mood_score = self.text_detector.detect(user_input)
+        
+        # Extract intent
+        intent = self.intent_classifier.classify(user_input)
+        
+        # Extract contextual signals
+        context_signals = self.context_extractor.extract(user_input)
+        
+        return EmotionalSignals(
+            # Mood
+            mood=mood_score.mood if mood_score.confidence >= 0.4 else None,
+            mood_vi=mood_score.mood,  # Vietnamese form
+            mood_confidence=mood_score.confidence,
+            intensity=mood_score.intensity,
+            keywords=mood_score.keywords_matched,
+            is_greeting=mood_score.is_greeting,
+            
+            # Context
+            temporal=context_signals.temporal,
+            activity=context_signals.activity,
+            social=context_signals.social,
+            energy=context_signals.energy,
+            
+            # Intent
+            intent=intent.primary_intent,
+            explicit_requests=intent.explicit_requests
+        )
+    
+    async def _generate_recommendation(
+        self,
+        session: ConversationSession
+    ) -> BotResponse:
+        """Build EnrichedRequest and delegate to ChatOrchestrator."""
+        # Build enriched request from accumulated context
+        enriched = EnrichedRequest(
+            user_id=session.user_id,
+            session_id=session.session_id,
+            mood=session.context.primary_mood,
+            mood_vi=MOOD_EN_TO_VI.get(session.context.primary_mood, session.context.primary_mood),
+            confidence=session.context.mood_confidence,
+            intensity=session.context.intensity_level,
+            context_signals={
+                "temporal": session.context.temporal_context,
+                "social": session.context.social_context,
+                "activity": session.context.activity_intent,
+                "energy": session.context.energy_preference
+            },
+            explicit_hints=session.context.explicit_requests,
+            conversation_summary=self._summarize_conversation(session)
+        )
+        
+        # Delegate to existing orchestrator
+        result = await self.orchestrator.process_enriched_request(enriched)
+        
+        # Update session with outcome
+        session.final_mood = enriched.mood
+        session.final_intensity = enriched.intensity
+        session.playlist_id = result.playlist_id
+        
+        return BotResponse(
+            message=result.bot_message,
+            songs=result.songs,
+            playlist_id=result.playlist_id,
+            response_type=ResponseType.RECOMMENDATION
+        )
+    
+    async def _generate_probing_response(
+        self,
+        session: ConversationSession
+    ) -> BotResponse:
+        """Select and return next probing question."""
+        # Identify what's missing
+        missing_fields = self._identify_missing_context(session.context)
+        
+        # Get question from strategy engine
+        question = self.strategy_engine.select_question(
+            state=session.state,
+            missing_fields=missing_fields,
+            turn_count=session.turn_count,
+            context=session.context
+        )
+        
+        return BotResponse(
+            message=question.text,
+            quick_replies=question.quick_replies,
+            response_type=ResponseType.PROBING
+        )
+    
+    def _identify_missing_context(
+        self,
+        context: EmotionalContext
+    ) -> List[str]:
+        """Identify which context fields are missing or weak."""
+        missing = []
+        
+        if context.primary_mood is None or context.mood_confidence < 0.5:
+            missing.append("mood")
+        if context.intensity_level == "Vừa" and context.mood_confidence < 0.7:
+            missing.append("intensity")
+        if context.activity_intent is None:
+            missing.append("activity")
+        if context.energy_preference is None and context.primary_mood not in ["Năng lượng", "Chill"]:
+            missing.append("energy")
+        if context.temporal_context is None:
+            missing.append("temporal")
+        
+        return missing
+    
+    def _summarize_conversation(self, session: ConversationSession) -> str:
+        """Generate summary for narrative generation."""
+        if not session.turns:
+            return ""
+        
+        user_inputs = [t.user_input for t in session.turns if t.user_input]
+        return " | ".join(user_inputs[-3:])  # Last 3 user messages
+```
+
+#### 3.4.2 DialogueFSM
+
+```python
+# backend/services/conversation/state_machine.py
+
+from enum import Enum, auto
+from dataclasses import dataclass
+from typing import Callable, List, Dict, Optional
+import re
+
+
+class DialogueState(Enum):
+    GREETING = auto()
+    PROBING_MOOD = auto()
+    PROBING_DEPTH = auto()
+    PROBING_CONTEXT = auto()
+    PROBING_INTENT = auto()
+    CONFIRMING = auto()
+    RECOMMENDING = auto()
+    REFINING = auto()
+    TERMINATED = auto()
+    ERROR = auto()
+
+
+@dataclass
+class Transition:
+    to: DialogueState
+    guard: Callable[[EmotionalContext, int], bool]
+    priority: int
+    description: str = ""
+
+
+class DialogueFSM:
+    """
+    Finite State Machine for dialogue flow control.
+    
+    Transition Priority:
+    - Lower priority number = higher precedence
+    - First matching guard wins
+    """
+    
+    def __init__(self):
+        self.transitions = self._build_transition_table()
+        self._early_exit_patterns = [
+            r'\bjust give\b', r'\bskip\b', r'\bphát nhạc\b', 
+            r'\bcho.*nghe\b', r'\bđề xuất\b', r'\bde xuat\b',
+            r'\brecommend\b', r'\bplaylist\b', r'\bcần.*nhạc\b',
+            r'\bmuốn nghe\b', r'\bwant.*music\b'
+        ]
+    
+    def _build_transition_table(self) -> Dict[DialogueState, List[Transition]]:
+        return {
+            DialogueState.GREETING: [
+                Transition(
+                    to=DialogueState.PROBING_MOOD,
+                    guard=lambda ctx, tc: True,
+                    priority=1,
+                    description="Always move to mood probing after greeting"
+                )
+            ],
+            
+            DialogueState.PROBING_MOOD: [
+                Transition(
+                    to=DialogueState.PROBING_DEPTH,
+                    guard=lambda ctx, tc: (
+                        ctx.primary_mood is not None and
+                        0.4 <= ctx.mood_confidence < 0.6
+                    ),
+                    priority=1,
+                    description="Mood detected but uncertain - probe deeper"
+                ),
+                Transition(
+                    to=DialogueState.PROBING_CONTEXT,
+                    guard=lambda ctx, tc: ctx.mood_confidence >= 0.6,
+                    priority=2,
+                    description="Mood confident - move to context"
+                ),
+                Transition(
+                    to=DialogueState.PROBING_MOOD,
+                    guard=lambda ctx, tc: ctx.primary_mood is None and tc < 3,
+                    priority=3,
+                    description="No mood yet, keep probing"
+                ),
+                Transition(
+                    to=DialogueState.PROBING_CONTEXT,
+                    guard=lambda ctx, tc: tc >= 3,
+                    priority=4,
+                    description="Max mood probes reached, fallback to context"
+                )
+            ],
+            
+            DialogueState.PROBING_DEPTH: [
+                Transition(
+                    to=DialogueState.PROBING_CONTEXT,
+                    guard=lambda ctx, tc: ctx.mood_confidence >= 0.55,
+                    priority=1,
+                    description="Depth probe successful"
+                ),
+                Transition(
+                    to=DialogueState.PROBING_CONTEXT,
+                    guard=lambda ctx, tc: tc >= 4,
+                    priority=2,
+                    description="Max depth probes reached"
+                )
+            ],
+            
+            DialogueState.PROBING_CONTEXT: [
+                Transition(
+                    to=DialogueState.PROBING_INTENT,
+                    guard=lambda ctx, tc: (
+                        ctx.activity_intent is not None or
+                        ctx.social_context is not None or
+                        ctx.temporal_context is not None
+                    ),
+                    priority=1,
+                    description="Context captured, move to intent"
+                ),
+                Transition(
+                    to=DialogueState.CONFIRMING,
+                    guard=lambda ctx, tc: tc >= 4,
+                    priority=2,
+                    description="Max context probes, skip to confirm"
+                )
+            ],
+            
+            DialogueState.PROBING_INTENT: [
+                Transition(
+                    to=DialogueState.CONFIRMING,
+                    guard=lambda ctx, tc: (
+                        ctx.energy_preference is not None or
+                        len(ctx.explicit_requests) > 0 or
+                        tc >= 4
+                    ),
+                    priority=1,
+                    description="Intent captured or max turns"
+                )
+            ],
+            
+            DialogueState.CONFIRMING: [
+                Transition(
+                    to=DialogueState.RECOMMENDING,
+                    guard=lambda ctx, tc: ctx.user_confirmed or tc >= 5,
+                    priority=1,
+                    description="User confirmed or max turns"
+                ),
+                Transition(
+                    to=DialogueState.PROBING_MOOD,
+                    guard=lambda ctx, tc: ctx.user_corrected,
+                    priority=2,
+                    description="User corrected - restart probing"
+                )
+            ],
+            
+            DialogueState.RECOMMENDING: [
+                Transition(
+                    to=DialogueState.REFINING,
+                    guard=lambda ctx, tc: True,
+                    priority=1,
+                    description="Move to refinement after recommendation"
+                )
+            ],
+            
+            DialogueState.REFINING: [
+                Transition(
+                    to=DialogueState.RECOMMENDING,
+                    guard=lambda ctx, tc: ctx.requested_change,
+                    priority=1,
+                    description="User requested change"
+                ),
+                Transition(
+                    to=DialogueState.TERMINATED,
+                    guard=lambda ctx, tc: ctx.is_satisfied,
+                    priority=2,
+                    description="User satisfied"
+                )
+            ],
+            
+            DialogueState.ERROR: [
+                Transition(
+                    to=DialogueState.PROBING_MOOD,
+                    guard=lambda ctx, tc: True,
+                    priority=1,
+                    description="Recover from error"
+                )
+            ]
+        }
+    
+    def transition(
+        self,
+        current_state: DialogueState,
+        context: EmotionalContext,
+        turn_count: int
+    ) -> DialogueState:
+        """
+        Determine next state based on current state and context.
+        
+        Returns:
+            Next DialogueState
+        """
+        transitions = self.transitions.get(current_state, [])
+        
+        # Evaluate guards in priority order
+        for trans in sorted(transitions, key=lambda t: t.priority):
+            try:
+                if trans.guard(context, turn_count):
+                    return trans.to
+            except Exception:
+                # Guard evaluation failed, skip
+                continue
+        
+        # No transition matched, stay in current state
+        return current_state
+    
+    def can_early_exit(
+        self,
+        context: EmotionalContext,
+        user_input: str
+    ) -> bool:
+        """Check if user explicitly requests immediate recommendation."""
+        text_lower = user_input.lower()
+        return any(
+            re.search(pattern, text_lower)
+            for pattern in self._early_exit_patterns
+        )
+```
+
+#### 3.4.3 EmotionDepthTracker
+
+```python
+# backend/services/conversation/emotion_tracker.py
+
+@dataclass
+class EmotionalSignals:
+    """Signals extracted from a single turn."""
+    mood: Optional[str] = None
+    mood_vi: Optional[str] = None
+    mood_confidence: float = 0.0
+    intensity: str = "Vừa"
+    keywords: List[str] = field(default_factory=list)
+    is_greeting: bool = False
+    
+    temporal: Optional[str] = None   # past, present, anticipatory
+    activity: Optional[str] = None   # working, relaxing, exercising, etc.
+    social: Optional[str] = None     # alone, with_others
+    energy: Optional[str] = None     # low, medium, high
+    
+    intent: Optional[str] = None
+    explicit_requests: List[str] = field(default_factory=list)
+
+
+@dataclass
+class MoodHistoryEntry:
+    """Single entry in mood evolution history."""
+    turn: int
+    mood: str
+    confidence: float
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class EmotionalContext:
+    """Accumulated emotional state across conversation."""
+    # Primary Detection
+    primary_mood: Optional[str] = None
+    mood_vi: Optional[str] = None
+    mood_confidence: float = 0.0
+    intensity_level: str = "Vừa"
+    
+    # Mood Evolution
+    mood_history: List[MoodHistoryEntry] = field(default_factory=list)
+    
+    # Context Signals
+    temporal_context: Optional[str] = None
+    social_context: Optional[str] = None
+    activity_intent: Optional[str] = None
+    energy_preference: Optional[str] = None
+    
+    # Explicit Requests
+    explicit_genres: List[str] = field(default_factory=list)
+    explicit_artists: List[str] = field(default_factory=list)
+    explicit_requests: List[str] = field(default_factory=list)
+    
+    # Keywords Accumulated
+    keywords_accumulated: List[str] = field(default_factory=list)
+    
+    # Scores
+    clarity_score: float = 0.0
+    mood_consistency_score: float = 0.5
+    intent_clarity_score: float = 0.0
+    
+    # Flags
+    user_confirmed: bool = False
+    user_corrected: bool = False
+    requested_change: bool = False
+    is_satisfied: bool = False
+    
+    def update(self, signals: EmotionalSignals) -> None:
+        """Update context with new signals."""
+        # Update mood if confidence is higher
+        if signals.mood and signals.mood_confidence > self.mood_confidence:
+            self.primary_mood = signals.mood
+            self.mood_vi = signals.mood_vi
+            self.mood_confidence = signals.mood_confidence
+        
+        # Track mood history
+        if signals.mood:
+            self.mood_history.append(MoodHistoryEntry(
+                turn=len(self.mood_history) + 1,
+                mood=signals.mood,
+                confidence=signals.mood_confidence
+            ))
+            # Keep last 10
+            self.mood_history = self.mood_history[-10:]
+        
+        # Update intensity if more specific
+        if signals.intensity != "Vừa" or self.intensity_level == "Vừa":
+            self.intensity_level = signals.intensity
+        
+        # Accumulate keywords
+        for kw in signals.keywords:
+            if kw not in self.keywords_accumulated:
+                self.keywords_accumulated.append(kw)
+        self.keywords_accumulated = self.keywords_accumulated[-20:]  # Limit
+        
+        # Update context fields (non-None values win)
+        if signals.temporal:
+            self.temporal_context = signals.temporal
+        if signals.activity:
+            self.activity_intent = signals.activity
+        if signals.social:
+            self.social_context = signals.social
+        if signals.energy:
+            self.energy_preference = signals.energy
+        
+        # Accumulate explicit requests
+        self.explicit_requests.extend(signals.explicit_requests)
+        self.explicit_requests = list(set(self.explicit_requests))  # Dedupe
+        
+        # Update consistency score
+        self._update_consistency_score()
+    
+    def _update_consistency_score(self) -> None:
+        """Calculate mood consistency across turns."""
+        if len(self.mood_history) < 2:
+            self.mood_consistency_score = 0.5
+            return
+        
+        moods = [entry.mood for entry in self.mood_history]
+        changes = sum(
+            1 for i in range(1, len(moods))
+            if moods[i] != moods[i-1]
+        )
+        self.mood_consistency_score = 1.0 - (changes / (len(moods) - 1))
+    
+    def reset_for_correction(self) -> None:
+        """Partial reset when user corrects."""
+        self.primary_mood = None
+        self.mood_vi = None
+        self.mood_confidence = 0.0
+        self.intensity_level = "Vừa"
+        self.user_corrected = False  # Reset flag
+        # Preserve: temporal_context, social_context, activity_intent
+```
+
+---
+
+## 4. Core Algorithms
+
+### 4.1 Emotion Clarity Model
+
+```python
+# backend/services/conversation/clarity_scorer.py
+
+class EmotionClarityModel:
+    """
+    Calculate emotional clarity score (0.0 - 1.0).
+    
+    Formula:
+    =========
+    clarity = Σ(weight[i] × component_score[i])
+    
+    Components:
+    -----------
+    - mood:        Weight=0.35  | Mood detected and specificity
+    - intensity:   Weight=0.15  | Intensity determination
+    - confidence:  Weight=0.20  | Raw detection confidence
+    - context:     Weight=0.15  | Contextual signals filled
+    - consistency: Weight=0.15  | Cross-turn mood stability
+    
+    Threshold: 0.70 for recommendation readiness
+    """
+    
+    WEIGHTS = {
+        "mood": 0.35,
+        "intensity": 0.15,
+        "confidence": 0.20,
+        "context": 0.15,
+        "consistency": 0.15
+    }
+    
+    def calculate(self, context: EmotionalContext) -> float:
+        """
+        Calculate overall clarity score.
+        
+        Returns:
+            Float in [0.0, 1.0]
+        """
+        scores = {}
+        
+        # =====================================================================
+        # Component 1: MOOD PRESENCE (0.35 weight)
+        # =====================================================================
+        # Formula: 1.0 if mood present, bonus from confidence
+        if context.primary_mood:
+            # Base: 0.7 for having a mood
+            # Bonus: up to 0.3 from confidence
+            scores["mood"] = min(1.0, 0.7 + (context.mood_confidence * 0.3))
+        else:
+            scores["mood"] = 0.0
+        
+        # =====================================================================
+        # Component 2: INTENSITY DETERMINATION (0.15 weight)
+        # =====================================================================
+        # Formula: Higher score for explicitly determined intensity
+        if context.intensity_level == "Mạnh" or context.intensity_level == "Nhẹ":
+            scores["intensity"] = 1.0  # Explicitly determined
+        elif context.intensity_level == "Vừa" and context.mood_confidence > 0.6:
+            scores["intensity"] = 0.7  # Default but confident
+        else:
+            scores["intensity"] = 0.4  # Uncertain
+        
+        # =====================================================================
+        # Component 3: RAW CONFIDENCE (0.20 weight)
+        # =====================================================================
+        # Formula: Direct from TextMoodDetector
+        scores["confidence"] = context.mood_confidence
+        
+        # =====================================================================
+        # Component 4: CONTEXT COMPLETENESS (0.15 weight)
+        # =====================================================================
+        # Formula: (filled_fields / total_fields)
+        context_fields = [
+            context.temporal_context,
+            context.social_context,
+            context.activity_intent,
+            context.energy_preference
+        ]
+        filled = sum(1 for f in context_fields if f is not None)
+        scores["context"] = filled / len(context_fields)
+        
+        # =====================================================================
+        # Component 5: CONSISTENCY (0.15 weight)
+        # =====================================================================
+        # Formula: 1.0 - (mood_changes / (turn_count - 1))
+        scores["consistency"] = context.mood_consistency_score
+        
+        # =====================================================================
+        # WEIGHTED SUM
+        # =====================================================================
+        clarity = sum(
+            self.WEIGHTS[component] * scores[component]
+            for component in self.WEIGHTS
+        )
+        
+        return min(1.0, max(0.0, clarity))
+    
+    def get_component_breakdown(
+        self,
+        context: EmotionalContext
+    ) -> Dict[str, float]:
+        """Get individual component scores for debugging."""
+        # ... (same logic as calculate, but return dict)
+        pass
+    
+    def is_ready_for_recommendation(
+        self,
+        context: EmotionalContext,
+        threshold: float = 0.70
+    ) -> Tuple[bool, str, float]:
+        """
+        Check if clarity is sufficient for recommendation.
+        
+        Returns:
+            (is_ready, reason, clarity_score)
+        """
+        clarity = self.calculate(context)
+        
+        if clarity >= threshold:
+            return True, "Clarity threshold met", clarity
+        
+        # Determine why not ready
+        if context.primary_mood is None:
+            return False, "No mood detected", clarity
+        
+        if context.mood_confidence < 0.4:
+            return False, f"Low confidence: {context.mood_confidence:.2f}", clarity
+        
+        return False, f"Clarity {clarity:.2f} below threshold {threshold}", clarity
+```
+
+### 4.2 IntentClassifier
+
+```python
+# backend/services/conversation/intent_classifier.py
+
+class IntentClassifier:
+    """
+    Classify user intent from text.
+    
+    Intents:
+    - mood_expression: User expressing feelings
+    - music_request: Explicit request for music
+    - context_sharing: Sharing situation/activity
+    - question: Asking the bot something
+    - feedback: Responding to bot's suggestion
+    - correction: Correcting previous understanding
+    - confirmation: Agreeing with bot
+    - rejection: Declining/disagreeing
+    """
+    
+    INTENT_PATTERNS = {
+        "mood_expression": [
+            r'\b(tôi|mình|em|anh|chị)?\s*(đang|cảm thấy|thấy|hơi|rất)\s',
+            r'\b(feeling|feel|am|i\'m)\s+(so\s+)?(happy|sad|tired|excited)',
+            r'\b(buồn|vui|mệt|chán|stress|lo|sợ|hứng|phấn)',
+        ],
+        "music_request": [
+            r'\b(cho|phát|bật|suggest|recommend|play)\s+(nhạc|music|bài|song)',
+            r'\b(muốn|cần|thích)\s+nghe',
+            r'\b(playlist|danh sách)',
+        ],
+        "context_sharing": [
+            r'\b(đang|sắp|vừa)\s+(làm việc|học|tập|chạy|ngủ|ăn|đi)',
+            r'\b(ở|tại|trong)\s+(nhà|công ty|quán|xe)',
+            r'\b(một mình|với bạn|cùng|alone|with)',
+        ],
+        "confirmation": [
+            r'^(ừ|ok|okay|yes|vâng|đúng|chính xác|chuẩn|oke)',
+            r'\b(đúng rồi|chính nó|tuyệt|perfect)',
+        ],
+        "rejection": [
+            r'^(không|no|nope|sai|chưa đúng)',
+            r'\b(không phải|không đúng|sai rồi)',
+        ],
+        "correction": [
+            r'\b(thực ra|nhưng mà|không phải|ý tôi là)',
+            r'\b(actually|i mean|not really)',
+        ],
+        "question": [
+            r'\?$',
+            r'^(sao|tại sao|làm sao|thế nào|gì|bao giờ|why|how|what|when)',
+        ],
+    }
+    
+    def classify(self, text: str) -> IntentResult:
+        """
+        Classify text into primary intent.
+        
+        Returns:
+            IntentResult with primary intent and confidence
+        """
+        text_lower = text.lower().strip()
+        scores = {}
+        
+        for intent, patterns in self.INTENT_PATTERNS.items():
+            match_count = 0
+            for pattern in patterns:
+                if re.search(pattern, text_lower):
+                    match_count += 1
+            scores[intent] = match_count / len(patterns)
+        
+        # Find top intent
+        if not scores or max(scores.values()) == 0:
+            return IntentResult(
+                primary_intent="unknown",
+                confidence=0.0,
+                all_intents=scores,
+                explicit_requests=[]
+            )
+        
+        primary = max(scores, key=scores.get)
+        
+        # Extract explicit requests
+        explicit = self._extract_explicit_requests(text_lower)
+        
+        return IntentResult(
+            primary_intent=primary,
+            confidence=scores[primary],
+            all_intents=scores,
+            explicit_requests=explicit
+        )
+    
+    def _extract_explicit_requests(self, text: str) -> List[str]:
+        """Extract explicit genre/artist/song requests."""
+        requests = []
+        
+        # Genre patterns
+        genre_pattern = r'\b(pop|rock|ballad|jazz|edm|rap|hip hop|r&b|indie|acoustic)\b'
+        genres = re.findall(genre_pattern, text, re.IGNORECASE)
+        requests.extend([f"genre:{g}" for g in genres])
+        
+        # Tempo patterns
+        if re.search(r'\b(nhanh|fast|upbeat|sôi động)\b', text):
+            requests.append("tempo:fast")
+        elif re.search(r'\b(chậm|slow|nhẹ nhàng)\b', text):
+            requests.append("tempo:slow")
+        
+        return requests
+```
+
+### 4.3 ClarificationStrategyEngine
+
+```python
+# backend/services/conversation/strategy_engine.py
+
+class ClarificationStrategyEngine:
+    """
+    Select optimal probing strategy based on conversation state.
+    
+    Strategies:
+    - direct_mood_probe: "Bạn đang cảm thấy thế nào?"
+    - depth_probe: "Cảm giác [mood] đó như thế nào?"
+    - context_probe: "Bạn đang làm gì vậy?"
+    - activity_probe: "Bạn đang ở đâu/làm gì?"
+    - energy_probe: "Bạn muốn nhạc sôi động hay nhẹ nhàng?"
+    - confirmation_probe: "Tôi hiểu bạn đang [mood], đúng không?"
+    """
+    
+    def __init__(self, question_bank: ProbeQuestionBank = None):
+        self.question_bank = question_bank or ProbeQuestionBank()
+    
+    def select_question(
+        self,
+        state: DialogueState,
+        missing_fields: List[str],
+        turn_count: int,
+        context: EmotionalContext
+    ) -> ProbeQuestion:
+        """
+        Select next probing question based on state and missing info.
+        
+        Returns:
+            ProbeQuestion with text and quick_replies
+        """
+        strategy = self._determine_strategy(state, missing_fields, turn_count, context)
+        return self.question_bank.get_question(strategy, context)
+    
+    def _determine_strategy(
+        self,
+        state: DialogueState,
+        missing_fields: List[str],
+        turn_count: int,
+        context: EmotionalContext
+    ) -> str:
+        """Determine which probing strategy to use."""
+        
+        # State-based priority
+        if state == DialogueState.GREETING:
+            return "greeting"
+        
+        if state == DialogueState.PROBING_MOOD:
+            if "mood" in missing_fields:
+                return "direct_mood_probe"
+            return "mood_clarification"
+        
+        if state == DialogueState.PROBING_DEPTH:
+            return "depth_probe"
+        
+        if state == DialogueState.PROBING_CONTEXT:
+            # Prioritize missing context fields
+            if "activity" in missing_fields:
+                return "activity_probe"
+            if "temporal" in missing_fields:
+                return "temporal_probe"
+            if "social" in missing_fields:
+                return "social_probe"
+            return "general_context_probe"
+        
+        if state == DialogueState.PROBING_INTENT:
+            if "energy" in missing_fields:
+                return "energy_probe"
+            return "intent_probe"
+        
+        if state == DialogueState.CONFIRMING:
+            return "confirmation_probe"
+        
+        return "fallback_probe"
+
+
+class ProbeQuestionBank:
+    """
+    Bank of probing questions organized by strategy.
+    """
+    
+    QUESTIONS = {
+        "greeting": [
+            ProbeQuestion(
+                text="Xin chào! 👋 Tôi là MusicMoodBot. Hôm nay bạn cảm thấy thế nào?",
+                quick_replies=["Đang vui", "Hơi buồn", "Bình thường", "Mệt mỏi"]
+            ),
+            ProbeQuestion(
+                text="Chào bạn! 🎵 Tâm trạng hôm nay của bạn ra sao?",
+                quick_replies=["Tuyệt vời!", "Cũng ổn", "Không tốt lắm", "Stress"]
+            ),
+        ],
+        "direct_mood_probe": [
+            ProbeQuestion(
+                text="Để tôi hiểu thêm nhé - bạn đang cảm thấy như thế nào?",
+                quick_replies=["Vui vẻ", "Buồn", "Bình tĩnh", "Năng lượng", "Chán"]
+            ),
+            ProbeQuestion(
+                text="Tâm trạng của bạn bây giờ có thể mô tả bằng từ nào?",
+                quick_replies=["Hạnh phúc", "Mệt mỏi", "Thoải mái", "Lo lắng"]
+            ),
+        ],
+        "depth_probe": [
+            ProbeQuestion(
+                text="Cảm giác {mood_vi} đó... bạn có muốn chia sẻ thêm không?",
+                quick_replies=["Rất mạnh", "Bình thường", "Chỉ hơi hơi"]
+            ),
+            ProbeQuestion(
+                text="Tôi nghe thấy bạn đang {mood_vi}. Cảm giác đó mạnh đến mức nào?",
+                quick_replies=["Rất nhiều", "Vừa phải", "Một chút thôi"]
+            ),
+        ],
+        "activity_probe": [
+            ProbeQuestion(
+                text="Bạn đang làm gì vậy? Để tôi chọn nhạc phù hợp nhé 🎵",
+                quick_replies=["Làm việc", "Nghỉ ngơi", "Tập thể dục", "Học bài"]
+            ),
+        ],
+        "energy_probe": [
+            ProbeQuestion(
+                text="Bạn muốn nhạc sôi động hay nhẹ nhàng hơn?",
+                quick_replies=["Sôi động!", "Nhẹ nhàng", "Vừa phải"]
+            ),
+        ],
+        "confirmation_probe": [
+            ProbeQuestion(
+                text="Để tôi chắc chắn nhé - bạn đang {mood_vi}, {activity_context}. Đúng không?",
+                quick_replies=["Đúng rồi!", "Chưa đúng lắm", "Để tôi nói rõ hơn"]
+            ),
+        ],
+        "fallback_probe": [
+            ProbeQuestion(
+                text="Bạn có thể chia sẻ thêm để tôi hiểu hơn không?",
+                quick_replies=[]
+            ),
+        ],
+    }
+    
+    def get_question(
+        self,
+        strategy: str,
+        context: EmotionalContext
+    ) -> ProbeQuestion:
+        """
+        Get a question for given strategy.
+        Substitutes context variables into template.
+        """
+        questions = self.QUESTIONS.get(strategy, self.QUESTIONS["fallback_probe"])
+        question = random.choice(questions)
+        
+        # Variable substitution
+        text = question.text.format(
+            mood_vi=context.mood_vi or "như vậy",
+            activity_context=context.activity_intent or "đang thư giãn",
+            **context.__dict__
+        )
+        
+        return ProbeQuestion(text=text, quick_replies=question.quick_replies)
+```
+
+### 4.4 ContextSignalExtractor
+
+```python
+# backend/services/conversation/context_extractor.py
+
+class ContextSignalExtractor:
+    """Extract contextual signals from user input."""
+    
+    TEMPORAL_PATTERNS = {
+        "past": [
+            r'\b(hôm qua|yesterday|tuần trước|last week|vừa|đã|mới)',
+            r'\b(từng|đã từng|used to)',
+        ],
+        "present": [
+            r'\b(đang|hiện tại|bây giờ|now|currently|right now)',
+            r'\b(hôm nay|today)',
+        ],
+        "anticipatory": [
+            r'\b(sắp|sẽ|chuẩn bị|mai|ngày mai|tomorrow)',
+            r'\b(going to|will|about to|later)',
+        ],
+    }
+    
+    ACTIVITY_PATTERNS = {
+        "working": [
+            r'\b(làm việc|working|công việc|văn phòng|office)',
+            r'\b(họp|meeting|deadline)',
+        ],
+        "relaxing": [
+            r'\b(nghỉ ngơi|relax|thư giãn|chill)',
+            r'\b(nằm|couch|giường|bed)',
+        ],
+        "exercising": [
+            r'\b(tập|gym|chạy|run|workout|thể dục)',
+            r'\b(yoga|cardio)',
+        ],
+        "studying": [
+            r'\b(học|study|đọc sách|reading|thi|exam)',
+        ],
+        "commuting": [
+            r'\b(đi làm|lái xe|driving|xe buýt|bus|tàu|metro)',
+        ],
+        "socializing": [
+            r'\b(party|tiệc|gặp bạn|hanging out|cafe)',
+        ],
+    }
+    
+    SOCIAL_PATTERNS = {
+        "alone": [
+            r'\b(một mình|alone|by myself)',
+            r'\b(lẻ loi|cô đơn|lonely)',
+        ],
+        "with_others": [
+            r'\b(với bạn|with friends|cùng|together)',
+            r'\b(gia đình|family|người yêu|bạn gái|bạn trai)',
+        ],
+    }
+    
+    ENERGY_PATTERNS = {
+        "low": [
+            r'\b(mệt|tired|kiệt sức|exhausted|uể oải)',
+            r'\b(muốn ngủ|sleepy|chậm|slow)',
+        ],
+        "medium": [
+            r'\b(bình thường|normal|vừa phải)',
+        ],
+        "high": [
+            r'\b(năng lượng|energetic|sôi động|pumped)',
+            r'\b(hào hứng|excited|fired up)',
+        ],
+    }
+    
+    def extract(self, text: str) -> ContextSignals:
+        """Extract all context signals from text."""
+        text_lower = text.lower()
+        
+        return ContextSignals(
+            temporal=self._match_category(text_lower, self.TEMPORAL_PATTERNS),
+            activity=self._match_category(text_lower, self.ACTIVITY_PATTERNS),
+            social=self._match_category(text_lower, self.SOCIAL_PATTERNS),
+            energy=self._match_category(text_lower, self.ENERGY_PATTERNS),
+        )
+    
+    def _match_category(
+        self,
+        text: str,
+        patterns: Dict[str, List[str]]
+    ) -> Optional[str]:
+        """Match text against category patterns."""
+        for category, pattern_list in patterns.items():
+            for pattern in pattern_list:
+                if re.search(pattern, text):
+                    return category
+        return None
+```
+
+---
+
+## 5. Decision Logic
+
+### 5.1 Core Decision Algorithm
+
+```python
+# Pseudo-code: Decision logic in ConversationManager.process_turn()
+
+def process_turn(session_id: str, user_input: str) -> ConversationTurn:
+    """
+    Core decision logic for multi-turn conversation.
+    """
+    
+    # ==========================================================================
+    # PHASE 1: LOAD & VALIDATE
+    # ==========================================================================
+    session = session_store.get(session_id)
+    
+    IF session is None:
+        RAISE SessionNotFoundError
+    
+    IF session.is_expired:
+        RAISE SessionExpiredError
+    
+    IF session.turn_count >= MAX_TURNS:
+        # Force recommendation
+        session.state = RECOMMENDING
+    
+    # ==========================================================================
+    # PHASE 2: EARLY EXIT CHECK
+    # ==========================================================================
+    IF fsm.can_early_exit(user_input):
+        # User explicitly wants playlist NOW
+        session.state = RECOMMENDING
+        GOTO PHASE 6
+    
+    # ==========================================================================
+    # PHASE 3: SIGNAL EXTRACTION
+    # ==========================================================================
+    signals = extract_signals(user_input)
+    
+    # Edge case: Greeting detected mid-conversation
+    IF signals.is_greeting AND session.turn_count > 1:
+        signals.is_greeting = False  # Likely just politeness, ignore
+    
+    # Edge case: Correction detected
+    IF intent_classifier.is_correction(user_input):
+        session.context.user_corrected = True
+        session.context.reset_for_correction()
+    
+    # Edge case: Confirmation detected
+    IF intent_classifier.is_confirmation(user_input):
+        session.context.user_confirmed = True
+    
+    # ==========================================================================
+    # PHASE 4: CONTEXT UPDATE
+    # ==========================================================================
+    session.context.update(signals)
+    session.turn_count += 1
+    
+    # ==========================================================================
+    # PHASE 5: CLARITY CALCULATION & FSM TRANSITION
+    # ==========================================================================
+    clarity = clarity_scorer.calculate(session.context)
+    session.context.clarity_score = clarity
+    
+    # Check recommendation readiness
+    is_ready, reason, _ = clarity_scorer.is_ready_for_recommendation(
+        session.context,
+        threshold=CLARITY_THRESHOLD
+    )
+    
+    # FSM transition
+    next_state = fsm.transition(
+        current_state=session.state,
+        context=session.context,
+        turn_count=session.turn_count
+    )
+    
+    # Override: If clarity high enough and not in GREETING, skip to CONFIRMING
+    IF is_ready AND next_state in [PROBING_MOOD, PROBING_DEPTH, PROBING_CONTEXT]:
+        next_state = CONFIRMING
+    
+    session.state = next_state
+    
+    # ==========================================================================
+    # PHASE 6: RESPONSE GENERATION
+    # ==========================================================================
+    
+    IF session.state == RECOMMENDING:
+        # ======================================================================
+        # RECOMMENDATION PATH
+        # ======================================================================
+        
+        # Edge case: No mood detected even after max turns
+        IF session.context.primary_mood is None:
+            session.context.primary_mood = "Chill"  # Safe default
+            session.context.mood_confidence = 0.5
+        
+        # Build enriched request
+        enriched = build_enriched_request(session)
+        
+        TRY:
+            result = chat_orchestrator.process_enriched_request(enriched)
+            response = BotResponse(
+                message=result.bot_message,
+                songs=result.songs,
+                playlist_id=result.playlist_id,
+                response_type=RECOMMENDATION
+            )
+        CATCH OrchestratorError:
+            # Fallback to simple recommendation
+            session.state = ERROR
+            response = generate_error_response()
+        
+        # Update session outcome
+        session.final_mood = enriched.mood
+        session.final_intensity = enriched.intensity
+        session.playlist_id = result.playlist_id
+        
+        # Transition to REFINING for potential adjustments
+        session.state = REFINING
+    
+    ELIF session.state == CONFIRMING:
+        # ======================================================================
+        # CONFIRMATION PATH
+        # ======================================================================
+        response = generate_confirmation_question(session.context)
+    
+    ELIF session.state == REFINING:
+        # ======================================================================
+        # REFINEMENT PATH
+        # ======================================================================
+        IF session.context.requested_change:
+            session.state = RECOMMENDING
+            GOTO PHASE 6  # Re-recommend
+        ELIF session.context.is_satisfied:
+            session.state = TERMINATED
+            response = generate_farewell()
+        ELSE:
+            response = generate_refinement_question()
+    
+    ELIF session.state == ERROR:
+        # ======================================================================
+        # ERROR RECOVERY PATH
+        # ======================================================================
+        response = BotResponse(
+            message="Xin lỗi, có lỗi xảy ra. Bạn có thể chia sẻ lại tâm trạng không?",
+            quick_replies=["Thử lại", "Bỏ qua"],
+            response_type=PROBING
+        )
+        session.state = PROBING_MOOD  # Reset to mood probing
+    
+    ELIF session.state == TERMINATED:
+        # ======================================================================
+        # TERMINATION PATH  
+        # ======================================================================
+        response = generate_farewell()
+    
+    ELSE:
+        # ======================================================================
+        # PROBING PATH (default)
+        # ======================================================================
+        missing_fields = identify_missing_context(session.context)
+        question = strategy_engine.select_question(
+            state=session.state,
+            missing_fields=missing_fields,
+            turn_count=session.turn_count,
+            context=session.context
+        )
+        response = BotResponse(
+            message=question.text,
+            quick_replies=question.quick_replies,
+            response_type=PROBING
+        )
+    
+    # ==========================================================================
+    # PHASE 7: PERSIST & RETURN
+    # ==========================================================================
+    turn = ConversationTurn(
+        turn_number=session.turn_count,
+        user_input=user_input,
+        bot_response=response,
+        state_before=state_before,
+        state_after=session.state,
+        clarity_score=clarity
+    )
+    session.turns.append(turn)
+    
+    session_store.save(session)
+    
+    RETURN turn
+```
+
+### 5.2 Edge Cases Handling
+
+| Edge Case | Detection | Handling |
+|-----------|-----------|----------|
+| **No mood after max turns** | `turn_count >= MAX_TURNS AND primary_mood is None` | Default to "Chill" mood with 0.5 confidence |
+| **User says "skip" or "just play"** | Pattern match on early exit phrases | Jump directly to RECOMMENDING state |
+| **User corrects bot** | Intent classifier detects correction | Reset mood/intensity, preserve context, return to PROBING_MOOD |
+| **Contradictory signals** | Mood history shows oscillation | Use most recent mood, flag low consistency |
+| **Greeting mid-conversation** | `is_greeting AND turn_count > 1` | Ignore greeting, extract any mood signals |
+| **Empty message** | `len(user_input.strip()) == 0` | Return gentle prompt for input |
+| **Orchestrator failure** | Exception during recommendation | Transition to ERROR state, offer fallback |
+| **Session expired** | `session.expires_at < now()` | Return expired message, suggest starting new |
+| **Concurrent requests** | Version mismatch on save | Reload session, retry logic |
+
+---
+
+## 6. Migration Plan
+
+### 6.1 Phased Rollout
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MIGRATION TIMELINE                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PHASE 0: PREPARATION (1 day)                                               │
+│  ├── Backup existing database                                               │
+│  ├── Create migration branch                                                │
+│  └── Setup feature flag                                                     │
+│                                                                             │
+│  PHASE 1: SCHEMA MIGRATION (1-2 days)                                       │
+│  ├── Run new table creation (non-breaking)                                  │
+│  ├── Add new columns to existing tables                                     │
+│  └── Create indexes                                                         │
+│                                                                             │
+│  PHASE 2: CODE DEPLOYMENT (2-3 days)                                        │
+│  ├── Deploy ConversationManager module                                      │
+│  ├── Deploy v2 API endpoints (parallel to v1)                               │
+│  └── Add process_enriched_request() to ChatOrchestrator                     │
+│                                                                             │
+│  PHASE 3: TESTING (2-3 days)                                                │
+│  ├── Integration tests with feature flag OFF                                │
+│  ├── Enable for test users                                                  │
+│  └── Monitor logs and metrics                                               │
+│                                                                             │
+│  PHASE 4: GRADUAL ROLLOUT (1 week)                                          │
+│  ├── 10% traffic → monitor                                                  │
+│  ├── 50% traffic → monitor                                                  │
+│  └── 100% traffic                                                           │
+│                                                                             │
+│  PHASE 5: CLEANUP (1 day)                                                   │
+│  ├── Drop redundant tables (after 30-day backup period)                     │
+│  └── Remove v1 endpoints (optional, can keep for compatibility)             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 Migration Script
+
+```python
+# backend/src/database/migrate_conversation.py
+
+import sqlite3
+from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+
+MIGRATION_VERSION = "2.0.0-conversation"
+
+MIGRATION_QUERIES = [
+    # =========================================================================
+    # STEP 1: Create new tables
+    # =========================================================================
+    """
+    CREATE TABLE IF NOT EXISTS conversation_sessions (
+        session_id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        state TEXT NOT NULL DEFAULT 'GREETING',
+        turn_count INTEGER NOT NULL DEFAULT 0,
+        clarity_score REAL DEFAULT 0.0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        is_active BOOLEAN DEFAULT TRUE,
+        final_mood TEXT,
+        final_intensity TEXT,
+        playlist_id TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )
+    """,
+    
+    "CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON conversation_sessions(user_id, is_active)",
+    "CREATE INDEX IF NOT EXISTS idx_sessions_expires ON conversation_sessions(expires_at)",
+    
+    """
+    CREATE TABLE IF NOT EXISTS conversation_turns (
+        turn_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        turn_number INTEGER NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('user', 'bot')),
+        content TEXT NOT NULL,
+        state_before TEXT NOT NULL,
+        state_after TEXT NOT NULL,
+        detected_mood TEXT,
+        mood_confidence REAL,
+        intensity TEXT,
+        keywords_detected TEXT,
+        temporal_context TEXT,
+        social_context TEXT,
+        activity_context TEXT,
+        energy_preference TEXT,
+        clarity_score_delta REAL DEFAULT 0.0,
+        cumulative_clarity REAL DEFAULT 0.0,
+        response_type TEXT,
+        quick_replies TEXT,
+        processing_latency_ms INTEGER,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE CASCADE
+    )
+    """,
+    
+    "CREATE INDEX IF NOT EXISTS idx_turns_session ON conversation_turns(session_id, turn_number)",
+    
+    """
+    CREATE TABLE IF NOT EXISTS emotional_contexts (
+        context_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL UNIQUE,
+        primary_mood TEXT,
+        mood_confidence REAL DEFAULT 0.0,
+        intensity_level TEXT DEFAULT 'Vừa',
+        mood_history TEXT DEFAULT '[]',
+        temporal_context TEXT,
+        social_context TEXT,
+        activity_intent TEXT,
+        energy_preference TEXT,
+        explicit_genres TEXT,
+        explicit_artists TEXT,
+        explicit_requests TEXT,
+        keywords_accumulated TEXT DEFAULT '[]',
+        mood_consistency_score REAL DEFAULT 0.5,
+        intent_clarity_score REAL DEFAULT 0.0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE CASCADE
+    )
+    """,
+    
+    """
+    CREATE TABLE IF NOT EXISTS probing_questions (
+        question_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_state TEXT NOT NULL,
+        target_field TEXT,
+        text_vi TEXT NOT NULL,
+        text_en TEXT,
+        quick_replies TEXT,
+        variant TEXT DEFAULT 'A',
+        usage_count INTEGER DEFAULT 0,
+        success_rate REAL DEFAULT 0.0,
+        condition_expr TEXT DEFAULT 'true',
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    
+    """
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+        key_hash TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        response_json TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE CASCADE
+    )
+    """,
+    
+    "CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_keys(expires_at)",
+    
+    # =========================================================================
+    # STEP 2: Modify existing tables (safe ALTERs)
+    # =========================================================================
+    
+    # Add conversation context to recommendations
+    """
+    ALTER TABLE recommendations ADD COLUMN conversation_session_id TEXT
+    REFERENCES conversation_sessions(session_id)
+    """,
+    
+    """
+    ALTER TABLE recommendations ADD COLUMN context_json TEXT
+    """,
+    
+    # Add emotional context to feedback
+    """
+    ALTER TABLE feedback ADD COLUMN conversation_session_id TEXT
+    REFERENCES conversation_sessions(session_id)
+    """,
+    
+    """
+    ALTER TABLE feedback ADD COLUMN emotional_context_snapshot TEXT
+    """,
+    
+    # Add conversation preferences to users
+    """
+    ALTER TABLE users ADD COLUMN conversation_style TEXT DEFAULT 'balanced'
+    """,
+    
+    """
+    ALTER TABLE users ADD COLUMN probing_preference INTEGER DEFAULT 3
+    """,
+    
+    # =========================================================================
+    # STEP 3: Seed initial question bank
+    # =========================================================================
+    """
+    INSERT OR IGNORE INTO probing_questions (target_state, target_field, text_vi, text_en, quick_replies) VALUES
+    ('GREETING', NULL, 'Xin chào! 👋 Tôi là MusicMoodBot. Hôm nay bạn cảm thấy thế nào?', 
+     'Hello! I''m MusicMoodBot. How are you feeling today?', 
+     '["Đang vui", "Hơi buồn", "Bình thường", "Mệt mỏi"]'),
+    ('PROBING_MOOD', 'mood', 'Để tôi hiểu thêm nhé - bạn đang cảm thấy như thế nào?', 
+     'Can you tell me more about how you''re feeling?',
+     '["Vui vẻ", "Buồn", "Bình tĩnh", "Năng lượng", "Chán"]'),
+    ('PROBING_DEPTH', 'intensity', 'Cảm giác đó mạnh đến mức nào?',
+     'How strong is that feeling?', 
+     '["Rất mạnh", "Bình thường", "Chỉ hơi hơi"]'),
+    ('PROBING_CONTEXT', 'activity', 'Bạn đang làm gì vậy? Để tôi chọn nhạc phù hợp nhé 🎵',
+     'What are you doing? Let me pick the right music for you.',
+     '["Làm việc", "Nghỉ ngơi", "Tập thể dục", "Học bài"]'),
+    ('PROBING_INTENT', 'energy', 'Bạn muốn nhạc sôi động hay nhẹ nhàng hơn?',
+     'Do you want upbeat or mellow music?',
+     '["Sôi động!", "Nhẹ nhàng", "Vừa phải"]'),
+    ('CONFIRMING', NULL, 'Để tôi chắc chắn nhé - tôi hiểu đúng chưa?',
+     'Let me make sure I understand correctly.',
+     '["Đúng rồi!", "Chưa đúng lắm", "Để tôi nói rõ hơn"]')
+    """,
+]
+
+
+def run_migration(db_path: str) -> bool:
+    """
+    Execute migration with transaction safety.
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    
+    try:
+        # Check if migration already applied
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='conversation_sessions'"
+        )
+        if cursor.fetchone():
+            logger.info("Migration already applied, skipping")
+            return True
+        
+        # Execute migrations
+        for i, query in enumerate(MIGRATION_QUERIES):
+            try:
+                conn.execute(query)
+                logger.info(f"Migration step {i+1}/{len(MIGRATION_QUERIES)} completed")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" in str(e).lower():
+                    logger.warning(f"Column already exists, skipping: {e}")
+                else:
+                    raise
+        
+        conn.commit()
+        logger.info(f"Migration {MIGRATION_VERSION} completed successfully")
+        return True
+        
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Migration failed: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def rollback_migration(db_path: str) -> bool:
+    """
+    Rollback migration (drop new tables only).
+    
+    WARNING: This will lose all conversation data!
+    """
+    conn = sqlite3.connect(db_path)
+    
+    try:
+        # Drop new tables (ORDER MATTERS due to foreign keys)
+        conn.execute("DROP TABLE IF EXISTS idempotency_keys")
+        conn.execute("DROP TABLE IF EXISTS emotional_contexts")
+        conn.execute("DROP TABLE IF EXISTS conversation_turns")
+        conn.execute("DROP TABLE IF EXISTS probing_questions")
+        conn.execute("DROP TABLE IF EXISTS conversation_sessions")
+        
+        conn.commit()
+        logger.info("Rollback completed")
+        return True
+        
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Rollback failed: {e}")
+        return False
+    finally:
+        conn.close()
+```
+
+### 6.3 Backward Compatibility
+
+```python
+# Feature flag for gradual rollout
+# backend/core/config.py
+
+import os
+
+class ConversationConfig:
+    ENABLE_MULTI_TURN = os.getenv("ENABLE_MULTI_TURN", "false").lower() == "true"
+    MULTI_TURN_PERCENTAGE = int(os.getenv("MULTI_TURN_PERCENTAGE", "0"))  # 0-100
+    
+    CLARITY_THRESHOLD = float(os.getenv("CLARITY_THRESHOLD", "0.70"))
+    MAX_TURNS = int(os.getenv("MAX_TURNS", "5"))
+    SESSION_TTL_MINUTES = int(os.getenv("SESSION_TTL_MINUTES", "30"))
+
+
+# API router with conditional routing
+# backend/api/v1/chat.py
+
+@router.post("/message")
+async def send_message(request: ChatMessageRequest, user_id: int = ...):
+    """
+    Backward compatible endpoint.
+    Routes to v2 conversation flow if enabled for user.
+    """
+    if _should_use_multi_turn(user_id):
+        # Route to conversation manager
+        return await _handle_multi_turn(request, user_id)
+    else:
+        # Original single-turn flow
+        orchestrator = get_chat_orchestrator()
+        return await orchestrator.process_message(...)
+
+
+def _should_use_multi_turn(user_id: int) -> bool:
+    """Determine if user should use multi-turn flow."""
+    if not ConversationConfig.ENABLE_MULTI_TURN:
+        return False
+    
+    if ConversationConfig.MULTI_TURN_PERCENTAGE == 100:
+        return True
+    
+    # Deterministic user bucketing
+    return (user_id % 100) < ConversationConfig.MULTI_TURN_PERCENTAGE
+```
+
+---
+
+## 7. Integration Plan
+
+### 7.1 ChatOrchestrator Extension
+
+```python
+# Minimal addition to existing ChatOrchestrator
+# backend/services/chat_orchestrator.py
+
+@dataclass
+class EnrichedRequest:
+    """Request from ConversationManager with accumulated context."""
+    user_id: int
+    session_id: str
+    mood: str
+    mood_vi: str
+    confidence: float
+    intensity: str
+    context_signals: Dict[str, Optional[str]]  # temporal, social, activity, energy
+    explicit_hints: List[str] = field(default_factory=list)
+    conversation_summary: str = ""
+
+
+class ChatOrchestrator:
+    # ... existing methods ...
+    
+    def process_enriched_request(
+        self,
+        request: EnrichedRequest,
+        limit: int = 10
+    ) -> ChatResponse:
+        """
+        Process pre-resolved request from ConversationManager.
+        
+        Skips mood detection, uses accumulated context for better recommendations.
+        """
+        # Build MoodResult from enriched request (skip detection)
+        mood_result = MoodResult(
+            mood=request.mood,
+            mood_vi=request.mood_vi,
+            confidence=request.confidence,
+            intensity=request.intensity,
+            keywords_matched=[],
+            is_greeting=False,
+            source="conversation"
+        )
+        
+        # Get candidates (existing method)
+        candidates = self._get_candidates(
+            mood_result.mood,
+            mood_result.intensity,
+            limit=50
+        )
+        
+        if not candidates:
+            candidates = self.song_repo.get_top_rated(limit=20)
+        
+        # Apply context-aware boosting (NEW)
+        candidates = self._apply_context_boost(
+            candidates,
+            request.context_signals
+        )
+        
+        # Continue existing pipeline
+        personalized = self._personalize(candidates, request.user_id, mood_result)
+        curated = self._curate_playlist(personalized[:limit * 2], mood_result)
+        final_songs = curated[:limit]
+        
+        # Save with conversation context
+        self._save_to_history_with_context(
+            request.user_id,
+            final_songs,
+            mood_result,
+            request.session_id,
+            request.context_signals,
+            request.conversation_summary
+        )
+        
+        # Generate context-aware narrative
+        bot_message = self._generate_contextual_narrative(
+            mood_result,
+            request.context_signals,
+            request.conversation_summary
+        )
+        
+        # Create playlist
+        playlist_id = None
+        if len(final_songs) >= 3:
+            song_ids = [s.song_id for s in final_songs]
+            playlist_id = self.playlist_repo.create_auto_playlist(
+                request.user_id, mood_result.mood_vi, song_ids
+            )
+        
+        return ChatResponse(
+            success=True,
+            detected_mood=mood_result,
+            bot_message=bot_message,
+            songs=final_songs,
+            playlist_id=playlist_id,
+            session_id=request.session_id
+        )
+    
+    def _apply_context_boost(
+        self,
+        candidates: List[Dict],
+        context: Dict[str, Optional[str]]
+    ) -> List[Dict]:
+        """Apply scoring boost based on contextual signals."""
+        for song in candidates:
+            boost = 0.0
+            
+            # Energy alignment
+            energy = song.get("energy", 50)
+            if context.get("energy") == "high" and energy > 70:
+                boost += 0.15
+            elif context.get("energy") == "low" and energy < 40:
+                boost += 0.15
+            elif context.get("energy") == "medium" and 40 <= energy <= 70:
+                boost += 0.10
+            
+            # Activity alignment
+            activity = context.get("activity")
+            tempo = song.get("tempo", 100)
+            
+            if activity == "working":
+                # Prefer moderate tempo, lower vocals
+                if 80 <= tempo <= 120 and song.get("instrumentalness", 0) > 50:
+                    boost += 0.10
+            elif activity == "exercising":
+                # Prefer high tempo, high energy
+                if tempo > 120 and energy > 65:
+                    boost += 0.15
+            elif activity == "relaxing":
+                # Prefer low tempo, high acousticness
+                if tempo < 100 and song.get("acousticness", 0) > 50:
+                    boost += 0.10
+            elif activity == "studying":
+                # Prefer instrumental, moderate tempo
+                if song.get("instrumentalness", 0) > 60:
+                    boost += 0.10
+            
+            # Time-of-day alignment (if temporal is present)
+            temporal = context.get("temporal")
+            if temporal == "anticipatory":  # Looking forward
+                # Prefer uplifting songs
+                if song.get("valence", 50) > 60:
+                    boost += 0.05
+            
+            song["context_boost"] = boost
+            song["_original_score"] = song.get("mood_match_score", 0.5)
+            song["mood_match_score"] = song.get("mood_match_score", 0.5) + boost
+        
+        return candidates
+    
+    def _generate_contextual_narrative(
+        self,
+        mood_result: MoodResult,
+        context: Dict[str, Optional[str]],
+        conversation_summary: str
+    ) -> str:
+        """Generate narrative incorporating conversation context."""
+        # Get base narrative
+        base = NarrativeGenerator.generate_response(
+            mood_result.mood,
+            mood_result.intensity
+        )
+        
+        # Add contextual touch
+        additions = []
+        
+        if context.get("activity") == "working":
+            additions.append("Những bài này sẽ giúp bạn tập trung làm việc hiệu quả hơn.")
+        elif context.get("activity") == "exercising":
+            additions.append("Nhịp điệu này sẽ đẩy bạn vượt qua giới hạn! 💪")
+        elif context.get("activity") == "relaxing":
+            additions.append("Thư giãn và tận hưởng nhé.")
+        
+        if context.get("social") == "alone":
+            additions.append("Âm nhạc sẽ là người bạn đồng hành.")
+        
+        if additions:
+            return base + " " + " ".join(additions)
+        
+        return base
+```
+
+### 7.2 API v2 Endpoints
+
+```python
+# backend/api/v2/conversation.py
+
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+router = APIRouter(prefix="/v2/conversation", tags=["Multi-Turn Conversation"])
+
+
+# =============================================================================
+# REQUEST/RESPONSE MODELS
+# =============================================================================
+
+class StartConversationRequest(BaseModel):
+    """Request to start new conversation."""
+    pass  # user_id comes from auth
+
+
+class StartConversationResponse(BaseModel):
+    session_id: str
+    bot_message: str
+    quick_replies: List[str]
+    state: str
+
+
+class TurnRequest(BaseModel):
+    session_id: str = Field(..., description="Active session ID")
+    message: str = Field(..., min_length=1, description="User message")
+    idempotency_key: Optional[str] = Field(None, description="Idempotency key for retry safety")
+
+
+class TurnResponse(BaseModel):
+    session_id: str
+    turn_number: int
+    state: str
+    clarity_score: float
+    bot_message: str
+    quick_replies: Optional[List[str]]
+    songs: Optional[List[SongResponse]]
+    playlist_id: Optional[str]
+    is_complete: bool
+    response_type: str  # 'probing', 'confirmation', 'recommendation', 'farewell'
+
+
+class SessionStatusResponse(BaseModel):
+    session_id: str
+    user_id: int
+    state: str
+    turn_count: int
+    clarity_score: float
+    is_active: bool
+    expires_at: str
+
+
+# =============================================================================
+# ENDPOINTS
+# =============================================================================
+
+@router.post("/start", response_model=StartConversationResponse)
+async def start_conversation(
+    user_id: int = Depends(get_current_user_id),
+    manager: ConversationManager = Depends(get_conversation_manager)
+):
+    """
+    Start a new multi-turn conversation session.
+    
+    Returns greeting message with quick replies.
+    """
+    session = await manager.start_session(user_id)
+    greeting = manager.question_bank.get_question("greeting", session.context)
+    
+    return StartConversationResponse(
+        session_id=session.session_id,
+        bot_message=greeting.text,
+        quick_replies=greeting.quick_replies,
+        state=session.state.name
+    )
+
+
+@router.post("/turn", response_model=TurnResponse)
+async def process_turn(
+    request: TurnRequest,
+    user_id: int = Depends(get_current_user_id),
+    manager: ConversationManager = Depends(get_conversation_manager)
+):
+    """
+    Process a single conversation turn.
+    
+    Returns either:
+    - A probing question (if more info needed)
+    - A playlist recommendation (if clarity threshold met)
+    """
+    try:
+        turn = await manager.process_turn(
+            session_id=request.session_id,
+            user_input=request.message,
+            idempotency_key=request.idempotency_key
+        )
+        
+        return TurnResponse(
+            session_id=request.session_id,
+            turn_number=turn.turn_number,
+            state=turn.state_after.name,
+            clarity_score=turn.clarity_score,
+            bot_message=turn.bot_response.message,
+            quick_replies=turn.bot_response.quick_replies or None,
+            songs=[_convert_song(s) for s in turn.bot_response.songs] if turn.bot_response.songs else None,
+            playlist_id=turn.bot_response.playlist_id,
+            is_complete=turn.state_after in [DialogueState.TERMINATED, DialogueState.REFINING],
+            response_type=turn.bot_response.response_type.value
+        )
+        
+    except SessionNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except SessionExpiredError:
+        raise HTTPException(status_code=410, detail="Session expired")
+
+
+@router.get("/{session_id}", response_model=SessionStatusResponse)
+async def get_session_status(
+    session_id: str,
+    user_id: int = Depends(get_current_user_id),
+    manager: ConversationManager = Depends(get_conversation_manager)
+):
+    """Get current session status."""
+    session = await manager.session_store.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if session.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return SessionStatusResponse(
+        session_id=session.session_id,
+        user_id=session.user_id,
+        state=session.state.name,
+        turn_count=session.turn_count,
+        clarity_score=session.context.clarity_score,
+        is_active=session.is_active,
+        expires_at=session.expires_at.isoformat()
+    )
+
+
+@router.delete("/{session_id}", status_code=204)
+async def end_conversation(
+    session_id: str,
+    user_id: int = Depends(get_current_user_id),
+    manager: ConversationManager = Depends(get_conversation_manager)
+):
+    """Force end a conversation session."""
+    await manager.abort_session(session_id)
+
+
+@router.get("/{session_id}/history")
+async def get_conversation_history(
+    session_id: str,
+    user_id: int = Depends(get_current_user_id),
+    manager: ConversationManager = Depends(get_conversation_manager)
+):
+    """Get full conversation history for a session."""
+    session = await manager.session_store.get(session_id)
+    if not session or session.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return {
+        "session_id": session_id,
+        "turns": [
+            {
+                "turn_number": t.turn_number,
+                "user_input": t.user_input,
+                "bot_response": t.bot_response.message,
+                "state": t.state_after.name,
+                "clarity_score": t.clarity_score,
+                "timestamp": t.timestamp.isoformat()
+            }
+            for t in session.turns
+        ]
+    }
+```
+
+---
+
+## 8. Example Multi-Turn Simulation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    MULTI-TURN CONVERSATION SIMULATION                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  === TURN 0: Session Start ===                                              │
+│  State: GREETING                                                            │
+│  Clarity: 0.00                                                              │
+│                                                                             │
+│  BOT: "Xin chào! 👋 Tôi là MusicMoodBot. Hôm nay bạn cảm thấy thế nào?"    │
+│  Quick Replies: [Đang vui, Hơi buồn, Bình thường, Mệt mỏi]                  │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  === TURN 1: User Input ===                                                 │
+│  USER: "Hôm nay mình hơi stress vì công việc"                               │
+│                                                                             │
+│  Signal Extraction:                                                         │
+│    - mood: "Suy tư" (stress mapped to Suy tư)                              │
+│    - confidence: 0.55                                                       │
+│    - intensity: "Vừa" (hơi → reduces intensity)                            │
+│    - activity: "working" (công việc detected)                              │
+│    - temporal: "present" (hôm nay)                                         │
+│                                                                             │
+│  Context Update:                                                            │
+│    primary_mood: "Suy tư"                                                   │
+│    mood_confidence: 0.55                                                    │
+│    activity_intent: "working"                                               │
+│    temporal_context: "present"                                              │
+│                                                                             │
+│  Clarity Calculation:                                                       │
+│    mood: 0.35 × (0.7 + 0.55×0.3) = 0.35 × 0.865 = 0.303                    │
+│    intensity: 0.15 × 0.7 = 0.105 (default Vừa with some confidence)        │
+│    confidence: 0.20 × 0.55 = 0.110                                          │
+│    context: 0.15 × (2/4) = 0.075 (activity + temporal filled)              │
+│    consistency: 0.15 × 0.5 = 0.075 (neutral, first mood)                   │
+│    TOTAL: 0.668                                                             │
+│                                                                             │
+│  FSM Transition: GREETING → PROBING_DEPTH (0.4 ≤ 0.55 < 0.6)               │
+│                                                                             │
+│  Decision: 0.668 < 0.70 threshold → Continue probing                        │
+│                                                                             │
+│  BOT: "Cảm giác stress đó như thế nào? Bạn có muốn chia sẻ thêm không?"    │
+│  Quick Replies: [Rất mạnh, Bình thường, Chỉ hơi hơi]                        │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  === TURN 2: User Input ===                                                 │
+│  USER: "Cũng không đến mức quá căng thẳng, chỉ là deadline nhiều thôi"     │
+│                                                                             │
+│  Signal Extraction:                                                         │
+│    - mood: "Suy tư" (căng thẳng → reinforces)                              │
+│    - confidence: 0.62 (boosted by reinforcement)                           │
+│    - intensity: "Nhẹ" (không đến mức quá → reduces)                        │
+│    - activity: "working" (deadline → reinforces)                           │
+│                                                                             │
+│  Context Update:                                                            │
+│    mood_confidence: 0.62 (increased)                                        │
+│    intensity_level: "Nhẹ" (refined)                                         │
+│    mood_consistency: 1.0 (same mood twice)                                  │
+│                                                                             │
+│  Clarity Calculation:                                                       │
+│    mood: 0.35 × (0.7 + 0.62×0.3) = 0.35 × 0.886 = 0.310                    │
+│    intensity: 0.15 × 1.0 = 0.150 (explicit Nhẹ)                            │
+│    confidence: 0.20 × 0.62 = 0.124                                          │
+│    context: 0.15 × (2/4) = 0.075                                            │
+│    consistency: 0.15 × 1.0 = 0.150 (perfect consistency)                   │
+│    TOTAL: 0.809                                                             │
+│                                                                             │
+│  FSM Transition: PROBING_DEPTH → PROBING_CONTEXT (0.62 ≥ 0.55)             │
+│                                                                             │
+│  Decision: 0.809 ≥ 0.70 threshold → BUT FSM wants context first            │
+│  Override: Skip to CONFIRMING (clarity high enough)                         │
+│                                                                             │
+│  BOT: "Để tôi chắc chắn nhé - bạn đang hơi stress vì công việc,            │
+│        muốn nhạc nhẹ nhàng để thư giãn. Đúng không?"                       │
+│  Quick Replies: [Đúng rồi!, Chưa đúng lắm]                                  │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  === TURN 3: User Input ===                                                 │
+│  USER: "Đúng rồi!"                                                          │
+│                                                                             │
+│  Signal Extraction:                                                         │
+│    - intent: confirmation                                                   │
+│    - user_confirmed: True                                                   │
+│                                                                             │
+│  FSM Transition: CONFIRMING → RECOMMENDING                                  │
+│                                                                             │
+│  === RECOMMENDATION PIPELINE ===                                            │
+│                                                                             │
+│  EnrichedRequest:                                                           │
+│    mood: "Suy tư" (stress)                                                  │
+│    intensity: "Nhẹ"                                                         │
+│    context_signals: {activity: "working", temporal: "present"}              │
+│    conversation_summary: "stress công việc | deadline | đúng rồi"          │
+│                                                                             │
+│  Context Boost Applied:                                                     │
+│    - working → prefer moderate tempo, instrumental                          │
+│    - Suy tư + Nhẹ → prefer calm, ambient tracks                            │
+│                                                                             │
+│  BOT: "Tôi hiểu bạn đang suy tư 🧠 Đây là những bài giúp bạn thư giãn.     │
+│        Những bài này sẽ giúp bạn tập trung làm việc hiệu quả hơn."         │
+│                                                                             │
+│  Songs: [Playlist of 10 calm, instrumental tracks suitable for focus]       │
+│  Playlist ID: "auto_suyt_1234"                                             │
+│                                                                             │
+│  State: REFINING                                                            │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  === TURN 4: User Input (Optional Refinement) ===                          │
+│  USER: "Hay đấy! Cảm ơn nhé"                                               │
+│                                                                             │
+│  Signal Extraction:                                                         │
+│    - intent: positive feedback                                              │
+│    - is_satisfied: True                                                     │
+│                                                                             │
+│  FSM Transition: REFINING → TERMINATED                                      │
+│                                                                             │
+│  BOT: "Rất vui được giúp bạn! 🎵 Chúc bạn nghe nhạc vui vẻ!"              │
+│                                                                             │
+│  === SESSION END ===                                                        │
+│  Total Turns: 4                                                             │
+│  Final Clarity: 0.809                                                       │
+│  Final Mood: Suy tư (stress)                                                │
+│  Final Intensity: Nhẹ                                                       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9. Production Considerations
+
+### 9.1 LLM Integration Path
+
+```python
+# Future: LLM-powered conversation
+# backend/services/conversation/llm_adapter.py
+
+class LLMAdapter:
+    """
+    Adapter for LLM-powered conversation.
+    Drop-in replacement for rule-based strategies.
+    """
+    
+    def __init__(self, provider: str = "gemini"):
+        self.provider = provider
+        self.client = self._init_client(provider)
+    
+    async def generate_probing_question(
+        self,
+        context: EmotionalContext,
+        conversation_history: List[Dict]
+    ) -> ProbeQuestion:
+        """
+        Use LLM to generate contextual probing question.
+        Falls back to rule-based if LLM fails.
+        """
+        prompt = self._build_prompt(context, conversation_history)
+        
+        try:
+            response = await self.client.generate(prompt)
+            return self._parse_response(response)
+        except LLMError:
+            # Fallback to rule-based
+            return self.question_bank.get_question(...)
+    
+    async def analyze_emotional_signals(
+        self,
+        user_input: str,
+        context: EmotionalContext
+    ) -> EmotionalSignals:
+        """
+        Use LLM for deeper emotional understanding.
+        Supplements rule-based extraction.
+        """
+        # ... LLM-powered analysis
+        pass
+```
+
+### 9.2 Streaming Response Support
+
+```python
+# Future: Streaming for long responses
+# backend/api/v2/conversation_stream.py
+
+from fastapi import WebSocket
+from starlette.websockets import WebSocketState
+
+@router.websocket("/ws/{session_id}")
+async def conversation_websocket(
+    websocket: WebSocket,
+    session_id: str,
+    user_id: int = Depends(get_current_user_ws)
+):
+    """
+    WebSocket endpoint for real-time conversation.
+    Enables streaming responses for better UX.
+    """
+    await websocket.accept()
+    
+    try:
+        while websocket.client_state == WebSocketState.CONNECTED:
+            data = await websocket.receive_json()
+            
+            if data["type"] == "message":
+                # Stream response tokens
+                async for token in manager.process_turn_streaming(
+                    session_id=session_id,
+                    user_input=data["content"]
+                ):
+                    await websocket.send_json({
+                        "type": "token",
+                        "content": token
+                    })
+                
+                await websocket.send_json({"type": "done"})
+                
+    except WebSocketDisconnect:
+        pass
+```
+
+### 9.3 Beyond SQLite
+
+```python
+# Future: Redis session store for scaling
+# backend/services/conversation/redis_session_store.py
+
+import redis.asyncio as redis
+
+class RedisSessionStore(SessionStore):
+    """
+    Redis-backed session store for horizontal scaling.
+    
+    Features:
+    - Automatic TTL management
+    - Pub/sub for real-time updates
+    - Cluster support for HA
+    """
+    
+    def __init__(self, redis_url: str):
+        self.redis = redis.from_url(redis_url)
+        self.prefix = "conv:"
+    
+    async def save(self, session: ConversationSession) -> None:
+        key = f"{self.prefix}{session.session_id}"
+        value = session.to_json()
+        ttl = int((session.expires_at - datetime.utcnow()).total_seconds())
+        
+        await self.redis.setex(key, ttl, value)
+    
+    async def get(self, session_id: str) -> Optional[ConversationSession]:
+        key = f"{self.prefix}{session_id}"
+        value = await self.redis.get(key)
+        
+        if value:
+            return ConversationSession.from_json(value)
+        return None
+    
+    async def get_with_lock(
+        self,
+        session_id: str,
+        lock_timeout: int = 5
+    ) -> Optional[ConversationSession]:
+        """Get session with distributed lock for concurrency."""
+        lock_key = f"{self.prefix}lock:{session_id}"
+        
+        # Acquire lock
+        acquired = await self.redis.set(
+            lock_key, "1", nx=True, ex=lock_timeout
+        )
+        if not acquired:
+            raise ConcurrencyError("Session locked by another request")
+        
+        try:
+            return await self.get(session_id)
+        finally:
+            # Release lock
+            await self.redis.delete(lock_key)
+```
+
+### 9.4 Analytics & Emotional Evolution Logging
+
+```python
+# Future: Analytics for emotional patterns
+# backend/services/analytics/conversation_analytics.py
+
+class ConversationAnalytics:
+    """
+    Track and analyze conversation patterns.
+    
+    Metrics:
+    - Average turns to recommendation
+    - Clarity progression curves
+    - Mood distribution
+    - Drop-off points
+    - Question effectiveness
+    """
+    
+    async def log_turn(self, turn: ConversationTurn) -> None:
+        """Log turn for analytics."""
+        await self.analytics_store.insert({
+            "event": "conversation_turn",
+            "session_id": turn.session_id,
+            "turn_number": turn.turn_number,
+            "state": turn.state_after.name,
+            "clarity_score": turn.clarity_score,
+            "mood": turn.detected_mood,
+            "timestamp": datetime.utcnow()
+        })
+    
+    async def get_clarity_progression(
+        self,
+        user_id: int,
+        days: int = 30
+    ) -> List[Dict]:
+        """Get user's clarity progression over time."""
+        # ... query analytics store
+        pass
+    
+    async def get_probing_effectiveness(
+        self,
+        question_id: int
+    ) -> Dict:
+        """Measure how effective a probing question is."""
+        # Calculate: clarity_delta after this question
+        # Calculate: success rate (led to recommendation)
+        pass
+```
+
+---
+
+## Summary
+
+This architecture provides:
+
+1. **Non-breaking upgrade** - All existing functionality preserved
+2. **Modular design** - ConversationManager sits above existing pipeline
+3. **Production-ready** - Includes concurrency control, idempotency, error handling
+4. **Measurable** - Clarity score provides concrete decision metric
+5. **Extensible** - Clear path to LLM integration, Redis scaling
+6. **Testable** - Each component has clear interfaces

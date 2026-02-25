@@ -3,8 +3,8 @@ Profile screen for MusicMoodBot - Figma Design 1:1
 """
 
 import flet as ft
-from ..config.theme_professional import *
-from ..utils.state_manager import app_state
+from src.config.theme_professional import *
+from src.utils.state_manager import app_state
 
 
 # Figma color scheme - Profile uses warm coral/terra-cotta

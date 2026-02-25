@@ -1,11 +1,19 @@
 """FastAPI application entry point."""
 
 import os
+from pathlib import Path
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+env_path = Path(__file__).parent / ".env"
+load_dotenv(env_path)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from backend.src.api.mood_api import router as mood_router
 from backend.src.api.extended_api import router as extended_router
 from backend.src.api.auth_api import router as auth_router
+from backend.api.v1 import v1_router  # New production API
 import logging
 
 # Setup logging
@@ -14,22 +22,23 @@ logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
-    title="Music Mood Prediction API",
+    title="MusicMoodBot API",
     description="""
-    ML-powered music mood prediction, search, and personalized recommendations.
+    Production-level music recommendation chatbot API.
     
     ## Features
-    - 🎵 Mood prediction from audio features
+    - 🎵 ML-based mood prediction from audio features
+    - 💬 Chat-based recommendations with NLP
     - 🔍 Smart search with Vietnamese support
-    - 📊 Analytics and insights
-    - 🎭 Mood transition planning
+    - 📊 User analytics and insights
+    - 🎭 Smooth playlist curation
+    - 👤 Personalized recommendations
     - 📋 Playlist management
-    - 🔗 Song similarity
-    - ⏰ Time-based recommendations
-    - 🌤️ Weather-based recommendations
-    - 👤 User preference learning
-    - 💾 Export/Import data
-    - 🗄️ Database optimization
+    
+    ## API Versions
+    - `/api/v1/` - Production chat API (recommended)
+    - `/api/v2/` - Extended analytics API
+    - `/api/moods/` - Legacy mood prediction
     """,
     version="2.1.0",
     docs_url="/api/docs",
@@ -53,6 +62,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(v1_router)  # New production API
 app.include_router(mood_router, prefix="/api/moods", tags=["moods"])
 app.include_router(extended_router, prefix="/api/v2", tags=["extended", "playlists", "analytics"])
 app.include_router(auth_router, prefix="/api/v2", tags=["authentication"])
@@ -72,21 +82,22 @@ def health_check():
 def root():
     """Root endpoint - redirects to API docs."""
     return {
-        "message": "Music Mood Prediction API",
+        "message": "MusicMoodBot API",
         "version": "2.1.0",
         "docs": "/api/docs",
         "redoc": "/api/redoc",
         "health": "/health",
         "endpoints": {
+            "chat": "/api/v1/chat/message",
+            "conversation": "/api/v1/conversation/turn",
+            "feedback": "/api/v1/chat/feedback",
+            "auth": "/api/v1/auth/login",
+            "user": "/api/v1/user/profile",
+            "playlist": "/api/v1/playlist",
             "moods": "/api/moods",
             "extended": "/api/v2",
             "playlists": "/api/v2/playlists",
-            "analytics": "/api/v2/analytics",
-            "similarity": "/api/v2/songs/{id}/similar",
-            "time_recommendations": "/api/v2/recommendations/now",
-            "user_preferences": "/api/v2/users/{id}/preferences",
-            "export": "/api/v2/export/songs",
-            "backup": "/api/v2/backup/create"
+            "analytics": "/api/v2/analytics"
         }
     }
 

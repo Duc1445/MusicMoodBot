@@ -1,222 +1,330 @@
 """
-Chat Service - Refactored
-==========================
-Clean chat service with proper imports and logging.
+Chat service for MusicMoodBot
+Handles chat operations, mood selection, intensity selection, and recommendations
+Integrated with v1 & v5 Production API
 """
 
-import random
+import requests
 from typing import Dict, List, Optional, Tuple
 
-# Centralized config
-from ..config.settings import settings, logger, MOOD_VI_TO_EN
+from src.config.constants import (
+    MOOD_EMOJI, INTENSITY_EMOJI, CHAT_STATE_AWAIT_MOOD, 
+    CHAT_STATE_AWAIT_INTENSITY, CHAT_STATE_CHATTING
+)
+from src.utils.state_manager import app_state
 
-# API client
-from .api_client import api, APIStatus
 
-# State
-from ..utils.state_manager import app_state
-
-# Database (optional fallback)
-try:
-    from backend.src.database.database import (
-        add_chat_history, add_recommendation, get_all_songs
-    )
-    HAS_LOCAL_DB = True
-except ImportError:
-    HAS_LOCAL_DB = False
-    logger.debug("Local database not available, using API only")
+# API Configuration - Using production API
+API_BASE_URL = "http://localhost:8000"
+API_V1_URL = f"{API_BASE_URL}/api/v1"
+API_V5_URL = f"{API_BASE_URL}/api/v1/v5"  # v5.0 Adaptive API
+API_TIMEOUT = 15  # seconds
 
 
 class ChatService:
-    """
-    Chat and recommendation service.
-    Handles communication with backend API.
-    """
+    """Handles chat and mood-based operations with v1/v5 API integration"""
     
     def __init__(self):
         self.api_available = False
+        self.session_id = None
         self._check_api_availability()
     
     def _check_api_availability(self):
         """Check if backend API is available"""
         try:
-            response = api.moods.health_check()
-            self.api_available = response.is_success
-            logger.info(f"API available: {self.api_available}")
-        except Exception as e:
-            logger.warning(f"API check failed: {e}")
+            response = requests.get(f"{API_BASE_URL}/health", timeout=2)
+            self.api_available = response.status_code == 200
+        except:
             self.api_available = False
-    
-    # ==================== MESSAGE METHODS ====================
     
     @staticmethod
     def add_message(sender: str, kind: str, text: str = None, song: dict = None):
-        """Add message to chat history via state"""
-        app_state.add_message(sender, kind, text, song)
-    
-    # ==================== SONG METHODS ====================
+        """Add message to chat history"""
+        msg = {
+            "sender": sender,
+            "kind": kind,
+            "text": text,
+            "song": song
+        }
+        app_state.chat_messages.append(msg)
     
     @staticmethod
-    def pick_song(mood: str) -> dict:
+    def select_mood(mood: str) -> str:
         """
-        Pick a song based on mood.
+        Handle mood selection
+        Returns: Bot response message
+        """
+        if not mood or mood not in MOOD_EMOJI:
+            return "Vui lòng chọn mood hợp lệ."
+        
+        emoji = MOOD_EMOJI.get(mood, "🎵")
+        ChatService.add_message("user", "text", f"{emoji} Mood: {mood}")
+        
+        # Update state
+        app_state.chat_flow["mood"] = mood
+        app_state.chat_flow["state"] = CHAT_STATE_AWAIT_INTENSITY
+        
+        return "Ok. Bạn muốn intensity mức nào? (Nhẹ / Vừa / Mạnh)"
+    
+    @staticmethod
+    def select_intensity(intensity: str) -> dict:
+        """
+        Handle intensity selection - Uses v1 API for recommendations
+        Returns: recommendation data with message
+        """
+        if not intensity or intensity not in INTENSITY_EMOJI:
+            return {"success": False, "message": "Vui lòng chọn intensity hợp lệ."}
+        
+        emoji = INTENSITY_EMOJI.get(intensity, "✨")
+        ChatService.add_message("user", "text", f"{emoji} Intensity: {intensity}")
+        
+        # Update state
+        app_state.chat_flow["intensity"] = intensity
+        app_state.chat_flow["state"] = CHAT_STATE_CHATTING
+        
+        # Call v1 API for mood-based recommendations
+        mood = app_state.chat_flow["mood"]
+        result = ChatService.get_mood_recommendations(mood, intensity)
+        
+        if result["success"]:
+            return result
+        
+        # Fallback to a simple response
+        return {
+            "success": True,
+            "songs": [],
+            "bot_message": "Xin lỗi, không tìm thấy bài hát phù hợp. Vui lòng thử lại."
+        }
+    
+    @staticmethod
+    def get_mood_recommendations(mood: str, intensity: str = "Vừa", limit: int = 5) -> dict:
+        """
+        Get song recommendations by mood using v1 API.
         
         Args:
-            mood: Vietnamese mood name (e.g., "Vui", "Buồn")
+            mood: Vietnamese mood name (Vui, Buồn, etc.)
+            intensity: "Nhẹ", "Vừa", or "Mạnh"
+            limit: Number of songs to return
             
         Returns:
-            Normalized song dictionary
+            Dict with success, songs, bot_message, playlist_id
         """
-        mood_en = MOOD_VI_TO_EN.get(mood, "happy")
-        logger.debug(f"Picking song for mood: {mood} ({mood_en})")
-        
-        # Try API first
         try:
-            response = api.moods.get_songs_by_mood(mood_en)
-            if response.is_success and response.data:
-                songs = response.data
-                if songs:
-                    song = random.choice(songs)
-                    logger.debug(f"API returned song: {song.get('song_name', 'N/A')}")
-                    return ChatService._normalize_song(song)
+            user_id = app_state.user_info.get("user_id") or 1
+            response = requests.post(
+                f"{API_V1_URL}/chat/mood",
+                json={
+                    "mood": mood,
+                    "intensity": intensity,
+                    "limit": limit,
+                    "user_id": user_id
+                },
+                timeout=API_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                songs = [ChatService._normalize_song(s) for s in data.get("songs", [])]
+                return {
+                    "success": True,
+                    "songs": songs,
+                    "bot_message": data.get("bot_message", ""),
+                    "playlist_id": data.get("playlist_id"),
+                    "detected_mood": data.get("detected_mood", {}),
+                    "session_id": data.get("session_id")
+                }
         except Exception as e:
-            logger.error(f"API error: {e}")
+            print(f"Mood recommendation error: {e}")
         
-        # Fallback to local database
-        if HAS_LOCAL_DB:
-            try:
-                songs = get_all_songs()
-                if songs:
-                    mood_songs = [s for s in songs if mood in str(s.get("moods", ""))]
-                    if mood_songs:
-                        return ChatService._normalize_song(random.choice(mood_songs))
-                    return ChatService._normalize_song(random.choice(songs))
-            except Exception as e:
-                logger.error(f"Local DB error: {e}")
-        
-        # Last resort fallback
-        return {
-            "name": "Không tìm thấy",
-            "artist": "System",
-            "genre": "N/A",
-            "suy_score": 0,
-            "reason": "Không tìm thấy bài hát phù hợp."
-        }
+        return {"success": False, "message": "Không thể kết nối đến server."}
     
     @staticmethod
-    def _normalize_song(song: dict) -> dict:
-        """Normalize song data from API to standard format"""
-        return {
-            "song_id": song.get("song_id"),
-            "name": song.get("song_name", song.get("name", "Unknown")),
-            "artist": song.get("artist", song.get("artist_name", "Unknown")),
-            "genre": song.get("genre", "Pop"),
-            "suy_score": round(float(song.get("mood_score", 5) or 5), 1),
-            "reason": song.get("recommendation_reason", ""),
-            "moods": [song.get("mood", "")]
-        }
-    
-    @staticmethod
-    def smart_recommend(text: str) -> Tuple[dict, dict]:
+    def smart_recommend(text: str, limit: int = 5) -> dict:
         """
-        Smart recommendation using text mood detection.
+        Smart recommendation using v5.0 adaptive API first, fallback to v1.
         
         Args:
             text: User's text describing their mood
+            limit: Number of songs to return
             
         Returns:
-            Tuple of (mood_info, song)
+            Dict with success, songs, detected_mood, bot_message
         """
-        user_id = app_state.user_info.get("user_id")
-        logger.info(f"Smart recommend for: {text[:30]}...")
-        
+        # Try v5.0 adaptive API first for better personalization
         try:
-            response = api.moods.smart_recommend(
-                text, 
-                user_id=str(user_id) if user_id else None, 
-                limit=5
+            user_id = app_state.user_info.get("user_id") or 1
+            
+            # Use v5.0 conversation continue for context-aware responses
+            response = requests.post(
+                f"{API_V5_URL}/conversation/continue",
+                json={
+                    "message": text,
+                    "input_type": "text",
+                    "include_recommendations": True,
+                    "max_recommendations": limit,
+                    "emotional_support_mode": True
+                },
+                timeout=API_TIMEOUT
             )
             
-            if response.is_success and response.data:
-                data = response.data
-                mood_info = data.get("detected_mood", {})
-                recommendations = data.get("recommendations", [])
+            if response.status_code == 200:
+                data = response.json()
                 
-                logger.debug(f"Detected mood: {mood_info.get('mood', 'N/A')}")
+                detected = {
+                    "mood": data.get("detected_mood"),
+                    "mood_vi": data.get("detected_mood"),
+                    "confidence": data.get("mood_confidence", 0),
+                    "intensity": "Vừa"
+                }
                 
-                if recommendations:
-                    song = ChatService._normalize_song(random.choice(recommendations))
-                    song["reason"] = recommendations[0].get("recommendation_reason", "")
-                    return mood_info, song
+                if detected.get("mood"):
+                    app_state.chat_flow["mood"] = detected.get("mood_vi", "Chill")
+                    app_state.chat_flow["state"] = CHAT_STATE_CHATTING
+                
+                # v5.0 returned recommendations - use them
+                if data.get("should_recommend") and data.get("recommendations"):
+                    songs = [ChatService._normalize_song(s) for s in data.get("recommendations", [])]
+                    
+                    return {
+                        "success": True,
+                        "songs": songs,
+                        "detected_mood": detected,
+                        "bot_message": data.get("bot_response", ""),
+                        "session_id": data.get("session_id"),
+                        "emotional_trend": data.get("emotional_trend"),
+                        "require_mood_selection": False
+                    }
+                else:
+                    # v5.0 needs more context - return clarifying question WITHOUT songs
+                    return {
+                        "success": True,
+                        "songs": [],  # No songs yet - need more conversation
+                        "detected_mood": detected,
+                        "bot_message": data.get("bot_response", "Bạn có thể chia sẻ thêm về tâm trạng không?"),
+                        "session_id": data.get("session_id"),
+                        "emotional_trend": data.get("emotional_trend"),
+                        "require_mood_selection": True,  # Signal that we need more input
+                        "clarity_score": data.get("clarity_score", 0),
+                        "turn_number": data.get("turn_number", 1)
+                    }
         except Exception as e:
-            logger.error(f"Smart recommend error: {e}")
+            print(f"v5.0 API error, falling back to v1: {e}")
         
-        # Fallback
-        return {
-            "mood": "Chill",
-            "confidence": 0.5,
-            "intensity": "Vừa"
-        }, ChatService.pick_song("Chill")
+        # Fallback to v1 API
+        try:
+            user_id = app_state.user_info.get("user_id") or 1
+            response = requests.post(
+                f"{API_V1_URL}/chat/message",
+                json={
+                    "message": text,
+                    "limit": limit,
+                    "user_id": user_id
+                },
+                timeout=API_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                songs = [ChatService._normalize_song(s) for s in data.get("songs", [])]
+                detected = data.get("detected_mood", {})
+                
+                # Update chat flow with detected mood
+                if detected:
+                    app_state.chat_flow["mood"] = detected.get("mood_vi", "Chill")
+                    app_state.chat_flow["intensity"] = detected.get("intensity", "Vừa")
+                    app_state.chat_flow["state"] = CHAT_STATE_CHATTING
+                
+                return {
+                    "success": True,
+                    "songs": songs,
+                    "detected_mood": detected,
+                    "bot_message": data.get("bot_message", ""),
+                    "playlist_id": data.get("playlist_id"),
+                    "session_id": data.get("session_id"),
+                    "require_mood_selection": data.get("require_mood_selection", False)
+                }
+        except Exception as e:
+            print(f"v1 API error: {e}")
+        
+        return {"success": False, "message": "Không thể kết nối đến server."}
     
     @staticmethod
-    def search_songs(query: str, top_k: int = 10) -> List[dict]:
+    def submit_feedback(song_id: int, feedback_type: str) -> bool:
         """
-        Search songs using TF-IDF search.
+        Submit feedback (like/dislike/skip) for a song.
         
         Args:
-            query: Search query
-            top_k: Number of results
+            song_id: ID of the song
+            feedback_type: "like", "dislike", or "skip"
             
         Returns:
-            List of matching songs
+            True if successful
         """
-        logger.debug(f"Searching songs: {query}")
         try:
-            response = api.moods.search_songs(query, limit=top_k)
-            if response.is_success and response.data:
-                songs = response.data
-                return [ChatService._normalize_song(s) for s in songs]
-        except Exception as e:
-            logger.error(f"Search error: {e}")
-        return []
-    
-    # ==================== DATABASE METHODS ====================
+            user_id = app_state.user_info.get("user_id") or 1
+            response = requests.post(
+                f"{API_V1_URL}/chat/feedback",
+                json={
+                    "song_id": song_id,
+                    "feedback_type": feedback_type,
+                    "user_id": user_id
+                },
+                timeout=API_TIMEOUT
+            )
+            return response.status_code == 200
+        except:
+            return False
     
     @staticmethod
-    def save_recommendation(song_id: int = None) -> bool:
-        """Save recommendation to database"""
-        if not app_state.user_info.get("user_id"):
-            return False
+    def get_available_moods() -> List[dict]:
+        """
+        Get list of available moods from API.
         
-        if not HAS_LOCAL_DB:
-            return False
-        
+        Returns:
+            List of mood dicts with name, emoji, description
+        """
         try:
-            add_recommendation(
-                app_state.user_info["user_id"],
-                song_id=song_id,
-                mood=app_state.chat_flow["mood"],
-                intensity=app_state.chat_flow["intensity"]
+            response = requests.get(
+                f"{API_V1_URL}/chat/moods",
+                timeout=API_TIMEOUT
             )
-            logger.debug(f"Saved recommendation: song_id={song_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Save recommendation error: {e}")
-            return False
+            if response.status_code == 200:
+                return response.json().get("moods", [])
+        except:
+            pass
+        
+        # Fallback to local constants
+        return [
+            {"name": mood, "emoji": MOOD_EMOJI.get(mood, "🎵")}
+            for mood in MOOD_EMOJI.keys()
+        ]
     
-    # ==================== UTILITY METHODS ====================
+    @staticmethod
+    def _normalize_song(song: dict) -> dict:
+        """Normalize song data from API to match expected format"""
+        return {
+            "song_id": song.get("song_id"),
+            "name": song.get("name") or song.get("song_name", "Unknown"),
+            "artist": song.get("artist", "Unknown"),
+            "genre": song.get("genre", "Pop"),
+            "mood": song.get("mood", ""),
+            "reason": song.get("reason", ""),
+            "match_score": song.get("match_score", 0),
+            "audio_features": song.get("audio_features", {})
+        }
     
     @staticmethod
     def generate_reason(mood: str, intensity: str, song: dict) -> str:
         """Generate recommendation reason"""
+        # Use API-generated reason if available
+        if song.get("reason"):
+            return song["reason"]
+        
         intensity_text = {
             "Nhẹ": "nhẹ nhàng",
             "Vừa": "vừa phải",
             "Mạnh": "mạnh mẽ"
         }.get(intensity, "phù hợp")
-        
-        if song.get("reason"):
-            return song["reason"]
         
         return (
             f"Dựa trên mood '{mood}' và intensity '{intensity_text}', "
@@ -226,10 +334,10 @@ class ChatService:
     
     @staticmethod
     def reset():
-        """Reset chat state"""
+        """Reset chat"""
         app_state.reset_chat()
-        logger.info("Chat service reset")
 
 
 # Singleton instance
 chat_service = ChatService()
+

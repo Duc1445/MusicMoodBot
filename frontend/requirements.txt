@@ -3,11 +3,9 @@ flet==0.80.2
 
 # API Communication
 requests>=2.31.0
-httpx>=0.25.0
 
 # Security (for password hashing fallback)
 hashlib
 
 # Utilities
 python-dateutil>=2.8.0
-python-dotenv>=1.0.0

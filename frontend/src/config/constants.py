@@ -22,7 +22,7 @@ COLORS = {
 }
 
 # ================== MOOD & INTENSITY ==================
-MOOD_CHIPS = ["Vui", "Buồn", "Suy tư", "Chill", "Năng lượng"]
+MOOD_CHIPS = ["Vui", "Buồn", "Năng động", "Thư giãn", "Tập trung"]
 INTENSITY_CHIPS = ["Nhẹ", "Vừa", "Mạnh"]
 
 # ================== MOOD EMOJI MAPPING ==================
@@ -32,6 +32,9 @@ MOOD_EMOJI = {
     "Suy tư": "🧠",
     "Chill": "😎",
     "Năng lượng": "⚡",
+    "Năng động": "⚡",
+    "Thư giãn": "🍃",
+    "Tập trung": "🎯",
     # English variants
     "happy": "😊",
     "sad": "😢",
@@ -56,7 +59,10 @@ MOOD_VI_TO_EN = {
     "Buồn": "sad",
     "Suy tư": "stress",
     "Chill": "happy",
-    "Năng lượng": "energetic"
+    "Năng lượng": "energetic",
+    "Năng động": "energetic",
+    "Thư giãn": "happy",
+    "Tập trung": "stress"
 }
 
 # Map English moods to Vietnamese (for display)

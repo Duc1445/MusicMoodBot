@@ -8,6 +8,9 @@ scikit-learn==1.4.2
 numpy==1.26.4
 scipy==1.13.0
 
+# AI/LLM Integration
+google-generativeai>=0.3.0
+
 # Database
 sqlalchemy>=2.0.0
 

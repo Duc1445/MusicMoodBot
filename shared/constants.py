@@ -67,7 +67,21 @@ MOOD_DESCRIPTIONS_EN = {
 
 # ================== INTENSITY ==================
 INTENSITIES = ["Nhẹ", "Vừa", "Mạnh"]
+INTENSITIES_VI = INTENSITIES  # Alias for Vietnamese intensities
 INTENSITIES_EN = ["low", "medium", "high"]
+
+# Intensity mapping
+INTENSITY_VI_TO_EN = {
+    "Nhẹ": "low",
+    "Vừa": "medium",
+    "Mạnh": "high"
+}
+
+INTENSITY_EN_TO_VI = {
+    "low": "Nhẹ",
+    "medium": "Vừa",
+    "high": "Mạnh"
+}
 
 # Intensity emoji mapping
 INTENSITY_EMOJI = {
